@@ -1,0 +1,30 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Runtime data (documents, translations, credentials)
+data/
+*.db
+*.db-wal
+*.db-shm
+vault.bin
+vault.key
+*.log
+
+# Build output
+build/
+dist/
+installer/build/
+installer/dist/
+*.spec
+
+# Tests and local samples
+tests/shots/
+tests/samples/
+tests/installer_tmp/
+tests/_*.json
+
+# Local config
+.env

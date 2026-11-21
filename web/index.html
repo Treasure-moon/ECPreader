@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#1B2450">
+<meta name="ecp-token" content="__ECP_TOKEN__">
+<meta name="ecp-version" content="__ECP_VERSION__">
+<title>ECPreader · 论文双语对照阅读器</title>
+<link rel="icon" href="/assets/img/logo.ico" sizes="any">
+<link rel="icon" type="image/png" sizes="32x32" href="/assets/img/logo-32.png">
+<link rel="apple-touch-icon" href="/assets/img/logo-180.png">
+<link rel="stylesheet" href="/assets/css/app.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand" id="brandHome" title="返回首页">
+    <img class="logo" src="/assets/img/logo-small.svg" alt="ECPreader">
+    <div class="brand-text"><strong>ECPreader</strong><span>论文双语对照阅读器</span></div>
+  </div>
+  <div class="doc-title" id="docTitle"></div>
+  <div class="top-actions">
+    <button class="btn ghost" id="btnOpen">打开文档</button>
+    <button class="btn ghost" id="btnHistory">历史记录</button>
+    <button class="btn ghost" id="btnSettings">翻译设置</button>
+    <button class="badge" id="engineBadge" title="点击修改翻译引擎">检测中…</button>
+    <button class="btn icon" id="btnTheme" title="切换主题">◐</button>
+  </div>
+</header>
+
+<main id="app">
+  <section id="homeView" class="home">
+    <div class="hero">
+      <div class="hero-brand"><img src="/assets/img/logo-mark.svg" alt=""><span>ECPreader</span></div>
+      <div class="hero-kicker">本地运行 · 数据不出电脑</div>
+      <h1>把论文拖进来，<br><em>左边英文，右边中文</em></h1>
+      <p>支持 PDF 与 Word(.docx)，保留标题、段落、图表说明、公式与参考文献结构；<br>选中任意一句，另一栏同步定位；选中单词，立即查看释义与语境意译。</p>
+    </div>
+
+    <div id="dropzone" class="dropzone" tabindex="0" role="button" aria-label="上传文档">
+      <div class="dz-icon">⇪</div>
+      <div class="dz-title">把 PDF 或 .docx 拖到这里</div>
+      <div class="dz-sub">或者 <button class="link" id="btnPick">选择文件</button> · 单文件不超过 100MB</div>
+      <div class="dz-hint">文件仅在本机解析与翻译，不会上传到任何服务器</div>
+      <input type="file" id="fileInput" accept=".pdf,.docx" hidden>
+    </div>
+
+    <div class="recent">
+      <div class="recent-head">
+        <h2>最近阅读</h2>
+        <button class="link" id="btnHistoryHome">全部历史 →</button>
+      </div>
+      <div id="recentList" class="recent-list"></div>
+    </div>
+
+    <div class="feature-grid">
+      <div class="feature"><div class="f-icon">⇄</div><h3>段落级双向对齐</h3><p>以句子为最小对齐单元，左右两栏共享同一滚动轴，原文与译文始终同行。</p></div>
+      <div class="feature"><div class="f-icon">◎</div><h3>选中即对照</h3><p>在任一栏选中内容，另一栏对应句子即时高亮；选中后可用顶部「重译此段」单独重译。</p></div>
+      <div class="feature"><div class="f-icon">“”</div><h3>单词释义</h3><p>选中单个英文单词，查看音标、词典释义、当前语境义与整句意译。</p></div>
+      <div class="feature"><div class="f-icon">⛨</div><h3>凭据本地加密</h3><p>API Key 使用 Windows DPAPI + AES-256-GCM 加密，永不落明文、永不上传。</p></div>
+    </div>
+
+    <p class="feedback-line">问题反馈请联系：<a href="mailto:treasure_moon@163.com">treasure_moon@163.com</a></p>
+  </section>
+
+  <section id="readerView" class="reader" hidden>
+    <aside class="side" id="sidePanel">
+      <div class="side-head"><span>目录</span><button class="btn icon tiny" id="btnToggleSide" title="收起侧栏">‹</button></div>
+      <nav id="toc" class="toc"></nav>
+      <div class="side-foot" id="docMeta"></div>
+    </aside>
+    <div class="reader-main">
+      <div class="reader-toolbar">
+        <div class="progress-wrap" id="progressWrap" hidden>
+          <div class="progress-text" id="progressText">准备翻译…</div>
+          <div class="progress-bar"><span id="progressBar"></span></div>
+          <button class="link" id="btnCancelJob">取消</button>
+        </div>
+        <div class="toolbar-right" id="toolbarRight">
+          <button class="btn small primary" id="btnTranslateAll">翻译全文</button>
+          <button class="btn small ghost" id="btnRetranslate">重新翻译</button>
+          <div class="select-wrap">
+            <label for="engineSelect">引擎</label>
+            <select id="engineSelect">
+              <option value="free">传统机翻</option>
+              <option value="ai">AI 翻译</option>
+            </select>
+          </div>
+          <button class="btn small ghost" id="btnExport">导出</button>
+          <button class="btn small ghost" id="btnBlockRetranslate" disabled title="重新翻译当前选中或点选的段落">重译此段</button>
+          <button class="btn small ghost" id="btnBlockCopy" disabled title="复制选中的文字；没有选中时复制整段中英对照">复制</button>
+          <div class="font-ctl" title="正文字号">
+            <button class="btn icon tiny" id="fontMinus">−</button>
+            <span id="fontLabel">16</span>
+            <button class="btn icon tiny" id="fontPlus">＋</button>
+          </div>
+        </div>
+      </div>
+      <div class="viewbar" id="viewBar">
+        <button class="btn small ghost side-toggle is-active" id="btnToggleSideTop" title="收起目录侧栏" aria-controls="sidePanel" aria-expanded="true">☰ 目录</button>
+        <div class="segmented" id="viewSwitch" role="group" aria-label="视图模式">
+          <button class="seg-btn active" data-view="layout" title="按 PDF 原始排版显示，图片与公式保持原样">原版对照</button>
+          <button class="seg-btn" data-view="flow" title="逐句重排，便于划选句子对照">逐句对照</button>
+        </div>
+        <div class="segmented" id="paneSwitch" role="group" aria-label="显示范围">
+          <button class="seg-btn active" data-pane="dual">双页</button>
+          <button class="seg-btn" data-pane="src">只看原文</button>
+          <button class="seg-btn" data-pane="tgt">只看译文</button>
+        </div>
+        <div class="zoom-ctl" id="zoomCtl">
+          <button class="btn icon tiny" id="zoomOut" title="缩小">−</button>
+          <span id="zoomLabel">100%</span>
+          <button class="btn icon tiny" id="zoomIn" title="放大">＋</button>
+          <button class="btn small ghost" id="zoomFit" title="恢复为适应宽度">适应宽度</button>
+        </div>
+        <div class="viewbar-hint" id="viewHint">点击段落联动 · 双击单词查释义</div>
+      </div>
+      <div class="colhead" id="colhead">
+        <div class="colhead-pad"></div>
+        <div>English · 原文</div>
+        <div>中文 · 译文 <span class="colhead-note" id="trNote"></span></div>
+      </div>
+      <div id="paper" class="paper"></div>
+    </div>
+  </section>
+</main>
+
+<div id="wordPopover" class="word-popover" hidden></div>
+
+<div id="settingsModal" class="modal" hidden>
+  <div class="modal-backdrop" data-close="settings"></div>
+  <div class="dialog" role="dialog" aria-modal="true" aria-label="翻译设置">
+    <header class="dialog-head">
+      <div>
+        <h2>翻译设置</h2>
+        <p class="sub">凭据只加密保存在本机，任何情况下都不上传</p>
+      </div>
+      <button class="btn icon" data-close="settings" aria-label="关闭">✕</button>
+    </header>
+    <div class="tabs">
+      <button class="tab active" data-tab="engine">翻译引擎</button>
+      <button class="tab" data-tab="data">数据与安全</button>
+    </div>
+    <div class="dialog-body">
+      <section class="tabpane active" data-pane="engine">
+        <div class="mode-cards">
+          <label class="mode-card">
+            <input type="radio" name="engineMode" value="free">
+            <div><strong>传统机翻</strong><span>免密钥、开箱即用 · 速度快 · 适合快速通读</span></div>
+          </label>
+          <label class="mode-card">
+            <input type="radio" name="engineMode" value="ai">
+            <div><strong>AI 翻译</strong><span>术语一致、学术表达 · 准确性最高（推荐精读）</span></div>
+          </label>
+        </div>
+
+        <div class="field-grid" id="freeFields">
+          <label class="field">
+            <span>免费服务</span>
+            <select id="freeProvider"></select>
+          </label>
+          <label class="field">
+            <span>邮箱（可选，用于提高 MyMemory 免费额度）</span>
+            <input id="freeEmail" type="email" placeholder="you@example.com" autocomplete="off">
+          </label>
+          <p class="field-note span2" id="freeNote"></p>
+        </div>
+
+        <div id="aiFields">
+          <div class="field-grid">
+            <label class="field">
+              <span>服务商</span>
+              <select id="aiProvider"></select>
+            </label>
+            <label class="field">
+              <span>模型</span>
+              <input id="aiModel" placeholder="deepseek-chat" spellcheck="false">
+            </label>
+            <label class="field span2">
+              <span>接口地址（OpenAI 兼容接口或 Ollama 地址）</span>
+              <input id="aiBaseUrl" placeholder="https://api.deepseek.com/v1" spellcheck="false">
+            </label>
+            <label class="field span2">
+              <span>API Key <em id="keyState" class="key-state"></em></span>
+              <div class="key-row">
+                <input id="aiKey" type="password" placeholder="填写后点击「保存密钥」，仅本机加密存储" autocomplete="new-password">
+                <button class="btn small" id="btnSaveKey" type="button">保存密钥</button>
+                <button class="btn small ghost" id="btnClearKey" type="button">清除</button>
+              </div>
+            </label>
+            <label class="field">
+              <span>并发数</span>
+              <select id="aiConcurrency">
+                <option value="1">1 · 最稳</option>
+                <option value="2">2</option>
+                <option value="3">3 · 推荐</option>
+                <option value="4">4</option>
+                <option value="5">5</option>
+                <option value="6">6 · 最快</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>温度 <output id="aiTempOut">0.2</output></span>
+              <input id="aiTemp" type="range" min="0" max="1" step="0.05">
+            </label>
+          </div>
+          <p class="preset-note" id="presetNote"></p>
+        </div>
+
+        <label class="field span2">
+          <span>自定义术语表（每行「英文=中文」，全篇强制统一）</span>
+          <textarea id="glossary" rows="3" placeholder="large language model=大语言模型&#10;retrieval-augmented generation=检索增强生成"></textarea>
+        </label>
+
+        <div class="switch-row">
+          <label class="switch"><input type="checkbox" id="trRefs"><span>翻译参考文献</span></label>
+          <label class="switch"><input type="checkbox" id="trFormulas"><span>翻译公式（不推荐，公式通常保留原样）</span></label>
+        </div>
+
+        <div class="test-row">
+          <button class="btn primary" id="btnTest" type="button">测试连接</button>
+          <span id="testResult" class="test-result"></span>
+        </div>
+      </section>
+
+      <section class="tabpane" data-pane="data">
+        <div class="security-card">
+          <div class="lock-icon">⛨</div>
+          <div>
+            <h3 id="secTitle">凭据加密存储</h3>
+            <p id="secDesc">正在读取加密状态…</p>
+            <dl class="kv" id="secKv"></dl>
+          </div>
+        </div>
+        <div class="storage-card">
+          <div class="storage-head">
+            <div>
+              <strong>数据存放位置</strong>
+              <p class="field-note">文档、译文、历史与加密密钥都在这个目录里，可放到空间更大的磁盘。</p>
+            </div>
+            <button class="btn small" id="btnPickDataDir" type="button">更改…</button>
+          </div>
+          <code id="dataDirPath" class="path-line">读取中…</code>
+          <p class="field-note" id="dataDirHint">更改后会把现有数据一起迁移到新目录，重启软件生效。</p>
+        </div>
+        <div class="data-actions">
+          <button class="btn" id="btnOpenDataDir">打开数据目录</button>
+          <button class="btn" id="btnBackup">导出备份</button>
+          <button class="btn danger-ghost" id="btnClearHistory">清空翻译历史</button>
+          <button class="btn danger-ghost" id="btnClearDocs">删除全部文档</button>
+        </div>
+        <p class="field-note">
+          所有文档、译文、术语表与历史记录都保存在本机数据目录的 SQLite 数据库中；
+          API Key 单独加密存放在 vault.bin，主密钥由 Windows DPAPI 绑定当前账户，换账户或换电脑都无法解密。
+          程序不包含任何埋点、遥测或云端同步。
+        </p>
+        <div class="about" id="aboutBox"></div>
+        <p class="feedback-line">问题反馈请联系：<a href="mailto:treasure_moon@163.com">treasure_moon@163.com</a></p>
+      </section>
+    </div>
+    <footer class="dialog-foot">
+      <span class="hint" id="settingsHint">修改后请点击「保存设置」</span>
+      <div>
+        <button class="btn ghost" data-close="settings">取消</button>
+        <button class="btn primary" id="btnSaveSettings">保存设置</button>
+      </div>
+    </footer>
+  </div>
+</div>
+
+<aside id="historyDrawer" class="drawer" hidden>
+  <div class="drawer-backdrop" data-close="history"></div>
+  <div class="drawer-panel">
+    <header class="drawer-head">
+      <h2>历史记录</h2>
+      <button class="btn icon" data-close="history" aria-label="关闭">✕</button>
+    </header>
+    <div class="drawer-search">
+      <input id="historySearch" placeholder="按标题 / 引擎搜索…" autocomplete="off">
+      <button class="btn small" id="btnHistorySearch">搜索</button>
+    </div>
+    <div id="historyList" class="history-list"></div>
+    <footer class="drawer-foot">
+      <button class="btn small ghost" id="btnDrawerBackup">导出备份</button>
+      <button class="btn small danger-ghost" id="btnDrawerClear">清空历史</button>
+    </footer>
+  </div>
+</aside>
+
+<div id="loading" class="loading" hidden>
+  <div class="loading-card">
+    <div class="spinner"></div>
+    <div id="loadingText">处理中…</div>
+    <button class="btn small ghost" id="btnLoadingCancel" hidden>取消</button>
+  </div>
+</div>
+
+<div id="toasts" class="toasts" aria-live="polite"></div>
+
+<script type="module" src="/assets/js/app.js"></script>
+</body>
+</html>
