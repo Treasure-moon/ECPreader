@@ -78,6 +78,7 @@ build_installer.bat
 - 数据目录包含 `app.db`（文档、译文、历史）、`vault.*`（加密凭据）、`uploads/`、`pages/`。
 - `vault.key` 由 Windows DPAPI 绑定当前账户，换账户或换电脑后需要重新填写 API Key。
 - 项目不包含埋点、遥测或云端同步。
+- 仓库和安装包不包含任何 API Key、文档或历史记录，首次启动是空白状态。
 
 ## 反馈
 
