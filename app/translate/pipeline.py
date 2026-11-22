@@ -12,8 +12,18 @@ from ..config import AI_PRESETS
 from .ai import AITranslator
 from .errors import TranslationError, error_payload
 from .free import FreeTranslator, needs_translation
+from .mathmask import mask_math, restore_math
 
 SKIP_TYPES = {"formula"}
+
+# 这些错误继续请求也没有意义：额度/凭据/配置问题必须立刻停下并提示用户。
+FATAL_CODES = {
+    "free_quota",
+    "quota",
+    "unauthorized",
+    "config_missing",
+}
+MAX_CONSECUTIVE_FAILURES = 3
 
 
 def build_free(settings: dict[str, Any] | None = None) -> FreeTranslator:
@@ -201,8 +211,10 @@ class Job:
     total: int = 0
     done: int = 0
     failed: int = 0
+    consecutive_failures: int = 0
     status: str = "running"
     error: dict[str, Any] | None = None
+    fatal_error: dict[str, Any] | None = None
     updates: list[dict[str, Any]] = field(default_factory=list)
     cancelled: bool = False
     started_at: float = field(default_factory=time.time)
@@ -231,6 +243,14 @@ class Job:
 
 JOBS: dict[str, Job] = {}
 _GLOSSARY_CACHE: dict[str, str] = {}
+
+
+def _fatal_stop(job: Job, exc: TranslationError) -> None:
+    """额度或配置类错误：立即停止整个任务，不再向接口发后续请求。"""
+    job.cancelled = True
+    job.status = "failed"
+    job.error = exc.to_dict()
+    job.fatal_error = job.error
 
 
 def get_job(job_id: str) -> Job | None:
@@ -332,9 +352,10 @@ async def run_job(
         else:
             free = translator
             await _run_free(job, blocks, targets, free)
-            resolved = await free.resolved_provider()
-            if resolved:
-                db.set_settings({"free_cached_provider": resolved})
+            if job.fatal_error is None:
+                resolved = await free.resolved_provider()
+                if resolved:
+                    db.set_settings({"free_cached_provider": resolved})
     except TranslationError as exc:
         job.error = exc.to_dict()
         job.status = "failed"
@@ -352,6 +373,17 @@ async def run_job(
                 await translator.aclose()
             except Exception:
                 pass
+        _finalize(job)
+        return
+
+    if job.fatal_error is not None:
+        job.status = "failed"
+        job.error = job.fatal_error
+        job.finished_at = time.time()
+        if isinstance(translator, FreeTranslator):
+            await translator.aclose()
+        if isinstance(translator, AITranslator):
+            await translator.aclose()
         _finalize(job)
         return
 
@@ -432,14 +464,18 @@ async def _run_ai(
             return
         seq = int(block["seq"])
         segments = block_segments(block)
-        items = [
-            {
-                "i": index,
-                "text": segment["src"],
-                "kind": block_kind(block),
-            }
-            for index, segment in enumerate(segments)
-        ]
+        masks: dict[int, list[str]] = {}
+        items = []
+        for index, segment in enumerate(segments):
+            masked, tokens = mask_math(segment["src"])
+            masks[index] = tokens
+            items.append(
+                {
+                    "i": index,
+                    "text": masked,
+                    "kind": block_kind(block),
+                }
+            )
         if not items:
             return
         meta = _context_for(blocks, seq, glossary_text)
@@ -448,17 +484,39 @@ async def _run_ai(
             if job.cancelled:
                 return
             try:
-                mapping = await translator.translate_items(items, meta)
+                try:
+                    mapping = await translator.translate_items(items, meta)
+                except TranslationError as exc:
+                    # 首次请求遇到限流/超时/上游抖动时自动重试一次，避免用户
+                    # 必须手动点“重译”。配置错误和额度不足不在自动重试范围。
+                    if exc.code not in {
+                        "rate_limit",
+                        "timeout",
+                        "network",
+                        "upstream_error",
+                        "bad_response",
+                        "empty_result",
+                    }:
+                        raise
+                    await asyncio.sleep(1.0)
+                    mapping = await translator.translate_items(items, meta)
                 translations = {
-                    segment["sid"]: mapping.get(index, segment["src"])
+                    segment["sid"]: restore_math(
+                        mapping.get(index, segment["src"]), masks.get(index, [])
+                    )
                     for index, segment in enumerate(segments)
                 }
                 translation = _make_translation(job.engine, job.model, translations)
                 db.save_block_translation(job.doc_id, seq, translation)
                 job.done += 1
+                job.consecutive_failures = 0
                 job.updates.append({"seq": seq, "translation": translation})
             except TranslationError as exc:
+                if exc.code in FATAL_CODES:
+                    _fatal_stop(job, exc)
+                    return
                 job.failed += 1
+                job.consecutive_failures += 1
                 failure = {
                     "status": "error",
                     "engine": job.engine,
@@ -471,8 +529,12 @@ async def _run_ai(
                 job.updates.append({"seq": seq, "translation": failure})
                 if job.error is None:
                     job.error = exc.to_dict()
+                if job.consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
+                    _fatal_stop(job, exc)
+                    return
             except Exception as exc:
                 job.failed += 1
+                job.consecutive_failures += 1
                 failure = {
                     "status": "error",
                     "engine": job.engine,
@@ -520,19 +582,29 @@ async def _run_free(
             if job.cancelled:
                 return
             try:
-                texts = [segment["src"] for segment in segments]
+                texts = []
+                masks: list[list[str]] = []
+                for segment in segments:
+                    masked, tokens = mask_math(segment["src"])
+                    texts.append(masked)
+                    masks.append(tokens)
                 translated = await translator.translate(texts)
                 mapping = {
-                    segment["sid"]: text
-                    for segment, text in zip(segments, translated)
+                    segment["sid"]: restore_math(text, masks[index])
+                    for index, (segment, text) in enumerate(zip(segments, translated))
                     if text
                 }
                 translation = _make_translation(job.engine, job.model, mapping)
                 db.save_block_translation(job.doc_id, seq, translation)
                 job.done += 1
+                job.consecutive_failures = 0
                 job.updates.append({"seq": seq, "translation": translation})
             except TranslationError as exc:
+                if exc.code in FATAL_CODES:
+                    _fatal_stop(job, exc)
+                    return
                 job.failed += 1
+                job.consecutive_failures += 1
                 failure = {
                     "status": "error",
                     "engine": job.engine,
@@ -545,8 +617,12 @@ async def _run_free(
                 job.updates.append({"seq": seq, "translation": failure})
                 if job.error is None:
                     job.error = exc.to_dict()
+                if job.consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
+                    _fatal_stop(job, exc)
+                    return
             except Exception as exc:
                 job.failed += 1
+                job.consecutive_failures += 1
                 failure = {
                     "status": "error",
                     "engine": job.engine,
@@ -573,6 +649,8 @@ async def retranslate_block(doc_id: str, seq: int, mode: str | None = None) -> d
     block = next((b for b in blocks if int(b["seq"]) == seq), None)
     if block is None:
         raise TranslationError("parse_error", message="段落不存在")
+    if block.get("type") in SKIP_TYPES:
+        raise TranslationError("empty_result", message="公式保持原样，不参与翻译")
     segments = block_segments(block)
     if not segments:
         raise TranslationError("empty_result", message="该段没有可翻译的文字")
@@ -583,27 +661,54 @@ async def retranslate_block(doc_id: str, seq: int, mode: str | None = None) -> d
         glossary_text = await _glossary_for(document, translator)
         meta = _context_for(blocks, seq, glossary_text)
         meta["title"] = document.get("title") or ""
-        items = [
-            {"i": index, "text": segment["src"], "kind": block_kind(block)}
-            for index, segment in enumerate(segments)
-        ]
+        masks: dict[int, list[str]] = {}
+        items = []
+        for index, segment in enumerate(segments):
+            masked, tokens = mask_math(segment["src"])
+            masks[index] = tokens
+            items.append({"i": index, "text": masked, "kind": block_kind(block)})
         try:
-            mapping = await translator.translate_items(items, meta)
+            try:
+                mapping = await translator.translate_items(items, meta)
+            except TranslationError as exc:
+                if exc.code not in {
+                    "rate_limit",
+                    "timeout",
+                    "network",
+                    "upstream_error",
+                    "bad_response",
+                    "empty_result",
+                }:
+                    raise
+                await asyncio.sleep(1.0)
+                mapping = await translator.translate_items(items, meta)
         finally:
             await translator.aclose()
+        translations = {
+            segment["sid"]: restore_math(
+                mapping.get(index, segment["src"]), masks.get(index, [])
+            )
+            for index, segment in enumerate(segments)
+        }
     else:
         translator = build_free(settings)
+        texts = []
+        masks_list: list[list[str]] = []
+        for segment in segments:
+            masked, tokens = mask_math(segment["src"])
+            texts.append(masked)
+            masks_list.append(tokens)
         try:
-            texts = [segment["src"] for segment in segments]
             translated = await translator.translate(texts)
-            mapping = {index: text for index, text in enumerate(translated)}
         finally:
             await translator.aclose()
-
-    translations = {
-        segment["sid"]: mapping.get(index, segment["src"])
-        for index, segment in enumerate(segments)
-    }
+        mapping = {index: text for index, text in enumerate(translated)}
+        translations = {
+            segment["sid"]: restore_math(
+                mapping.get(index, segment["src"]), masks_list[index]
+            )
+            for index, segment in enumerate(segments)
+        }
     translation = _make_translation(engine, model, translations)
     db.save_block_translation(doc_id, seq, translation)
     return translation

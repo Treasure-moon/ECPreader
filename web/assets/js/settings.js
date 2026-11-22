@@ -125,7 +125,6 @@ function fill(data) {
   updateFreeNote();
   updatePresetNote();
   renderSecurity(data.security || {});
-  renderAbout(data);
   $('dataDirPath').textContent = data.security?.data_dir || '';
   const fallback = data.security?.data_dir_fallback;
   $('dataDirHint').textContent = fallback
@@ -170,12 +169,6 @@ function renderSecurity(security) {
     <dt>数据目录</dt><dd>${escapeHtml(security.data_dir || '')}</dd>
     <dt>数据库</dt><dd>${escapeHtml(security.db_file || '')}</dd>
   `;
-}
-
-function renderAbout(data) {
-  const version = document.querySelector('meta[name="ecp-version"]')?.content || '';
-  $('aboutBox').innerHTML = `ECPreader v${escapeHtml(version)} · 本地运行 · 无遥测<br>
-    文档解析：PyMuPDF / python-docx　　翻译：MyMemory / Google / Bing 与 OpenAI 兼容接口`;
 }
 
 export async function openSettings() {

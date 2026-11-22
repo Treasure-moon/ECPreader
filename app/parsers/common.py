@@ -41,6 +41,11 @@ SECTION_NAMES = {
     "future work",
     "acknowledgments",
     "acknowledgements",
+    "acknowledgment",
+    "author contributions",
+    "data availability",
+    "conflict of interest",
+    "declaration of competing interest",
     "references",
     "bibliography",
     "appendix",
@@ -52,6 +57,12 @@ REFERENCE_HEADING_RE = re.compile(
 )
 
 NUMBERED_HEADING_RE = re.compile(r"^\s*(\d+(?:\.\d+){0,3})\.?\s+[A-Z\u4e00-\u9fff]")
+ROMAN_HEADING_RE = re.compile(r"^\s*([IVXLCDM]{1,6})\.\s+(.+)$")
+LETTER_HEADING_RE = re.compile(r"^\s*([A-Z])\.\s+(.+)$")
+ARABIC_HEADING_RE = re.compile(r"^\s*(\d{1,2}(?:\.\d{1,2}){0,3})\.?\s+(.+)$")
+HEADING_MARKER_RE = re.compile(
+    r"^\s*(?:[IVXLCDM]{1,6}\.|\d{1,2}(?:\.\d{1,2}){0,3}\.?|[A-Z]\.)\s+"
+)
 
 ABBREVIATIONS = {
     "e.g.",
@@ -108,8 +119,9 @@ MATH_FONT_HINTS = (
 )
 
 MATH_CHARS = set(
-    "=≠≈≤≥±∓×÷∑∏∫∮√∞∂∇∈∉⊂⊃∪∩∀∃→←↔⇒⇔"
+    "=≠≈≤≥±∓×÷−∑∏∫∮√∞∂∇∈∉⊂⊃∪∩∀∃→←↔⇒⇔"
     "αβγδεζηθικλμνξοπρστυφχψωΓΔΘΛΞΠΣΦΨΩ"
+    "∆∥˜ˆˇ′″"
 )
 
 
@@ -174,15 +186,87 @@ def split_sentences(text: str) -> list[str]:
     return merged
 
 
+def clean_heading_text(text: str) -> str:
+    """去掉 IEEE 论文标题/章节标题后粘连的段首下沉字母（drop cap）。
+
+    例如 ``I. INTRODUCTION E`` 里的 ``E`` 实际是下一段 ``ESTIMATING`` 的首字母，
+    被 PDF 文本块并进了标题；它会让目录和译文都多出一个字母。
+    """
+    stripped = (text or "").strip()
+    match = ROMAN_HEADING_RE.match(stripped)
+    if not match:
+        return stripped
+    rest = match.group(2).strip()
+    words = rest.split()
+    if len(words) < 2 or not rest.isupper():
+        return stripped
+    tail = words[-1]
+    if len(tail) != 1 or not tail.isalpha():
+        return stripped
+    # 只有当最后一个字母明显是下一段的首字母时才删，避免误伤 “MODEL A”。
+    if len(words) >= 3 or words[0].lower() in SECTION_NAMES:
+        return f"{match.group(1)}. {' '.join(words[:-1])}"
+    return stripped
+
+
+def _heading_rest_ok(rest: str) -> bool:
+    """判断编号后面的文字是否像章节标题，而不是公式/正文残片。"""
+    rest = rest.strip()
+    if not rest or len(rest) > 140:
+        return False
+    if rest[-1:] in ".,;:?!":
+        return False
+    if re.search(r"[=(){}\[\]<>^_|]", rest):
+        return False
+    letters = sum(ch.isalpha() for ch in rest)
+    digits = sum(ch.isdigit() for ch in rest)
+    if letters < 2 or digits > letters * 0.6:
+        return False
+    if not (rest[0].isupper() or "\u4e00" <= rest[0] <= "\u9fff"):
+        return False
+    return True
+
+
+def _heading_marker_level(text: str) -> int:
+    """根据章节编号返回层级：I. / 1. 为 1，A. / 2.1 为 2。"""
+    stripped = text.strip()
+    roman = ROMAN_HEADING_RE.match(stripped)
+    if roman and (
+        len(roman.group(1)) > 1 or roman.group(1) in {"I", "V", "X"}
+    ) and _heading_rest_ok(roman.group(2)):
+        return 1
+    letter = LETTER_HEADING_RE.match(stripped)
+    if letter and _heading_rest_ok(letter.group(2)):
+        return 2
+    arabic = ARABIC_HEADING_RE.match(stripped)
+    if arabic and _heading_rest_ok(arabic.group(2)):
+        number = arabic.group(1)
+        depth = len(number.split("."))
+        try:
+            first = int(number.split(".")[0])
+        except ValueError:
+            return 0
+        # 排除 “64 J(j−1)” 这类公式残片和年份/页码。
+        if first > 99 or not re.search(r"[A-Za-z\u4e00-\u9fff]{2,}", arabic.group(2)):
+            return 0
+        return min(depth, 3)
+    return 0
+
+
 def _looks_like_heading(
     text: str, size: float, body_size: float, bold_ratio: float
 ) -> tuple[bool, int]:
-    stripped = text.strip()
+    stripped = clean_heading_text(text)
     if not stripped or len(stripped) > 160:
+        return False, 0
+    if re.search(r"[=(){}\[\]<>^_|−±×÷]", stripped):
         return False, 0
     lowered = stripped.lower().rstrip(".:")
     if lowered in SECTION_NAMES and len(stripped) <= 60:
         return True, 1 if len(stripped.split()) <= 3 else 2
+    marker_level = _heading_marker_level(stripped)
+    if marker_level:
+        return True, marker_level
     numbered = NUMBERED_HEADING_RE.match(stripped)
     if numbered and len(stripped) < 120 and not stripped.endswith("."):
         depth = len(numbered.group(1).split("."))
@@ -206,22 +290,114 @@ def _looks_like_heading(
 
 def _looks_like_formula(text: str, fonts: set[str], italic_ratio: float) -> bool:
     stripped = text.strip()
-    if not stripped or len(stripped) > 260:
+    if not stripped:
         return False
-    letters = sum(ch.isalpha() for ch in stripped)
-    digits = sum(ch.isdigit() for ch in stripped)
-    math_symbols = sum(ch in MATH_CHARS for ch in stripped)
-    operators = sum(ch in "+-*/^_{}<>" for ch in stripped)
-    total = max(len(stripped), 1)
+    # PDF 公式块里常混入控制字符（根号、矩阵括号等），这是最可靠的信号。
+    if re.search(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", stripped):
+        return True
+    clean = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", stripped).strip()
+    if not clean:
+        return True
+    if len(clean) > 260:
+        return False
+    # 只有数字、标点、括号的块（公式编号、根号残片、单个运算符）。
+    if re.fullmatch(r"[\s\d.,;:()\[\]{}<>=+\-*/^_|!?′'\"#∥∆∇˜ˆˇ]+", clean):
+        return True
+    if re.fullmatch(r"[\s.]*\(?\d{1,3}\)?[\s.]*", clean):
+        return True
+
+    letters = sum(ch.isalpha() for ch in clean)
+    digits = sum(ch.isdigit() for ch in clean)
+    math_symbols = sum(ch in MATH_CHARS for ch in clean)
+    operators = sum(ch in "+-−*/^_{}<>()[]|" for ch in clean)
+    total = max(len(clean), 1)
+    words = re.findall(r"[A-Za-z]{2,}", clean)
+    lower_words = [word for word in words if word.islower()]
+    function_words = re.findall(
+        r"\b(?:the|is|are|was|were|of|to|and|in|for|with|that|this|can|be|as|by|"
+        r"from|on|at|it|we|our|which|where|when|using|based|denote|denotes|"
+        r"represent|represents|obtain|obtained|given|shows|shown|follows|"
+        r"respectively|however|therefore|thus|also|has|have|had|not|than)\b",
+        clean,
+        re.IGNORECASE,
+    )
+    sentence_like = len(lower_words) >= 2 or bool(function_words)
+
+    # 列表小标题（如 “1) Population Initialization:”）不是公式。
+    if re.match(r"^\s*(?:\d+\)|[A-Z]\))\s+[A-Z]", clean):
+        return False
+
+    # 带三个以上英文实词、又没有等号/集合符号的块是正文，不是公式
+    # （例如 “the overall complexity is O(T × NP × M × N)”）。
+    if len(lower_words) >= 3 and not re.search(r"[=∈∉≤≥]", clean):
+        return False
+
+    # 标题式短语（标题、DOI 行、图注）即使含连字符/斜杠也不当公式。
+    alpha_words = [word for word in re.findall(r"[A-Za-z]+", clean) if len(word) >= 2]
+    if (
+        len(alpha_words) >= 3
+        and sum(word[0].isupper() for word in alpha_words) >= len(alpha_words) * 0.7
+        and math_symbols == 0
+        and not re.search(r"[=<>∈∉≤≥±×÷∑∫]", clean)
+    ):
+        return False
 
     if any(hint in font.lower() for font in fonts for hint in MATH_FONT_HINTS):
         alnum = (letters + digits) / total
         if alnum < 0.9 and (math_symbols + operators) >= 1:
             return True
     density = (math_symbols + operators) / total
-    if math_symbols >= 2 and density > 0.08:
+    if math_symbols >= 2 and density > 0.06:
         return True
-    if operators >= 3 and density > 0.18 and italic_ratio > 0.3:
+    if len(clean) <= 80 and not sentence_like and (math_symbols + operators) >= 1:
+        return True
+    if (
+        operators >= 2
+        and density > 0.12
+        and (italic_ratio > 0.25 or not sentence_like)
+    ):
+        return True
+    if len(clean) <= 60 and not sentence_like:
+        tokens = re.findall(r"[A-Za-z]+|\d+", clean)
+        if tokens and all(len(token) <= 4 for token in tokens):
+            alpha_tokens = [token for token in tokens if token.isalpha()]
+            # “T, TC”“RC”“Xi,d”这类上下标变量块；全大写多词标题不在此列。
+            all_caps_phrase = (
+                len(alpha_tokens) >= 2
+                and all(token.isupper() for token in alpha_tokens)
+                and all(len(token) >= 4 for token in alpha_tokens)
+            )
+            if not all_caps_phrase and any(
+                re.fullmatch(r"[A-Z][A-Za-z]?\d?", token)
+                or token.isupper()
+                or token.isdigit()
+                for token in alpha_tokens
+            ):
+                return True
+        if clean.lower() in {
+            "min",
+            "max",
+            "exp",
+            "cos",
+            "sin",
+            "tan",
+            "log",
+            "arccos",
+            "arcsin",
+            "arctan",
+            "err",
+            "arg",
+        }:
+            return True
+    # 极短的变量残片（t j / b / i / u j −u0）只可能是公式；保留原文。
+    if (
+        len(clean) <= 20
+        and letters >= 1
+        and not re.search(r"[a-z]{2,}", clean)
+        and not (clean.isupper() and len(clean) >= 4)
+        and clean.lower()
+        not in {"in", "it", "as", "at", "by", "to", "of", "on", "or", "so", "we", "he", "if", "is", "be", "do", "go", "no", "up", "my", "me", "us"}
+    ):
         return True
     return False
 

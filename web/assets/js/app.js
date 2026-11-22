@@ -4,6 +4,7 @@ import * as layout from './layout.js';
 import * as dict from './dict.js';
 import { initSettings, openSettings } from './settings.js';
 import { initHistory, openHistory } from './history.js';
+import * as search from './search.js';
 import {
   toast,
   toastError,
@@ -11,6 +12,7 @@ import {
   showLoading,
   hideLoading,
   applyTheme,
+  openModal,
   closeModal,
   download,
   formatDate,
@@ -71,8 +73,8 @@ function updateViewChrome() {
   const fontCtl = document.querySelector('.font-ctl');
   if (fontCtl) fontCtl.hidden = layoutOn;
   $('viewHint').textContent = layoutOn
-    ? '选中英文或中文即同步高亮 · 双击单词查释义 · 顶部可重译/复制'
-    : '划选句子，另一栏同步高亮 · 顶部可重译/复制当前段';
+    ? '选中英文或中文即同步高亮 · 双击单词查释义 · Ctrl+F 查找'
+    : '划选句子，另一栏同步高亮 · Ctrl+F 查找';
   const layoutButton = $('viewSwitch').querySelector('[data-view="layout"]');
   if (layoutButton) {
     const ok = supportsLayout(state.doc);
@@ -91,6 +93,8 @@ function updateViewChrome() {
 
 function renderCurrent({ preserveScroll = false } = {}) {
   if (!state.doc) return;
+  // 视图切换会重建 DOM；旧查找高亮/结果不再有效。
+  search.closeSearch();
   const paper = $('paper');
   const ratio = preserveScroll && paper.scrollHeight
     ? paper.scrollTop / paper.scrollHeight
@@ -124,6 +128,7 @@ function showReader() {
 }
 
 function showHome() {
+  search.closeSearch();
   state.activeSeq = null;
   updateBlockTools();
   $('readerView').hidden = true;
@@ -151,22 +156,25 @@ function callbacks() {
 
 async function ensureLayoutReady(document) {
   if (!document || document.filetype !== 'pdf') return document;
-  if (supportsLayout(document)) return document;
+  const outdated = Number(document.meta?.parser_version || 0) < 3;
+  if (supportsLayout(document) && !outdated) return document;
   if (state.reparsed.has(document.id)) return document;
   state.reparsed.add(document.id);
-  showLoading('正在准备原版视图…');
+  showLoading(outdated ? '正在更新目录与公式识别…' : '正在准备原版视图…');
   try {
     const data = await api.post(`/api/documents/${document.id}/reparse`, {});
     toast({
-      title: '已启用原版视图',
-      message: '已按论文原本的版面重新排布，图片、公式保持原样，原有译文已尽量保留。',
+      title: outdated ? '目录结构已更新' : '已启用原版视图',
+      message: outdated
+        ? '已重新识别章节标题与公式，原有译文已尽量保留。'
+        : '已按论文原本的版面重新排布，图片、公式保持原样，原有译文已尽量保留。',
       type: 'success',
       duration: 5000,
     });
     return data.document;
   } catch (err) {
     toast({
-      title: '暂时无法启用原版视图',
+      title: outdated ? '目录更新失败' : '暂时无法启用原版视图',
       message: err.info?.message || '已切换为逐句对照模式。',
       type: 'warn',
       duration: 6000,
@@ -367,15 +375,18 @@ function finishJob(job, error) {
   } else {
     setDocStatus('partial');
     const info = job.error || {};
+    const freeQuota = info.code === 'free_quota';
+    const quota = freeQuota || info.code === 'quota';
+    const actions = [{ label: '打开翻译设置', primary: true, onClick: () => openSettings() }];
+    if (job.mode === 'free') actions.push({ label: '改用 AI 翻译', onClick: () => switchMode('ai') });
+    else actions.push({ label: '改用免费机翻', onClick: () => switchMode('free') });
     toast({
-      title: info.message || '翻译失败',
-      message: info.hint || '请检查翻译引擎设置后重试。',
+      title: freeQuota ? '免费翻译额度已用完，已停止' : (quota ? '接口额度不足，已停止' : (info.message || '翻译失败')),
+      message: quota ? (info.message || '接口额度已用尽，后续请求已停止。') : (info.hint || '请检查翻译引擎设置后重试。'),
+      hint: quota ? (info.hint || '请更换引擎或到服务商控制台处理额度。') : '',
       type: 'error',
-      duration: 15000,
-      actions: [
-        { label: '打开设置', primary: true, onClick: () => openSettings() },
-        { label: '改用免费机翻', onClick: () => switchMode('free') },
-      ],
+      duration: 20000,
+      actions,
     });
   }
   renderRecent();
@@ -608,6 +619,21 @@ function toggleSide() {
   setSideCollapsed(!$('readerView').classList.contains('side-collapsed'));
 }
 
+function openAbout() {
+  const version = document.querySelector('meta[name="ecp-version"]')?.content || '';
+  $('aboutVersion').textContent = version;
+  openModal($('aboutModal'));
+}
+
+async function openExternal(url) {
+  try {
+    const result = await api.post('/api/system/open-external', { url });
+    if (result?.ok === false) window.open(url, '_blank', 'noopener');
+  } catch (err) {
+    toastError(err);
+  }
+}
+
 function bind() {
   $('btnOpen').addEventListener('click', () => $('fileInput').click());
   $('btnPick').addEventListener('click', (event) => {
@@ -624,6 +650,14 @@ function bind() {
   $('btnHistory').addEventListener('click', openHistory);
   $('btnHistoryHome').addEventListener('click', openHistory);
   $('btnTheme').addEventListener('click', cycleTheme);
+  $('btnSearch').addEventListener('click', () => search.openSearch());
+  $('btnAbout').addEventListener('click', openAbout);
+  $('aboutModal').querySelectorAll('[data-close="about"]').forEach((node) => {
+    node.addEventListener('click', () => closeModal($('aboutModal')));
+  });
+  $('aboutModal').querySelectorAll('[data-external]').forEach((node) => {
+    node.addEventListener('click', () => openExternal(node.dataset.external));
+  });
   $('btnTranslateAll').addEventListener('click', () => startTranslation(false));
   $('btnRetranslate').addEventListener('click', () => {
     if (window.confirm('重新翻译会覆盖当前译文，确定继续吗？')) startTranslation(true);
@@ -652,6 +686,7 @@ function bind() {
   $('paneSwitch').addEventListener('click', (event) => {
     const button = event.target.closest('[data-pane]');
     if (!button) return;
+    search.closeSearch();
     state.paneMode = button.dataset.pane;
     layout.setPaneMode(state.paneMode);
     updateViewChrome();
@@ -701,7 +736,9 @@ function bind() {
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') {
       closeMenu();
+      search.closeSearch();
       closeModal($('settingsModal'));
+      closeModal($('aboutModal'));
       $('historyDrawer').hidden = true;
     }
   });
@@ -712,6 +749,15 @@ function bind() {
 
 async function init() {
   bind();
+  search.initSearch({
+    getDocument: () => state.doc,
+    onUnavailable: () => toast({
+      title: '先打开一篇文档',
+      message: '打开文档后按 Ctrl+F 查找原文或译文。',
+      type: 'info',
+      duration: 3000,
+    }),
+  });
   initSettings({ onSettingsChanged: () => refreshSettings().catch(() => {}) });
   initHistory({ onOpen: (docId) => openDocumentById(docId) });
   try {

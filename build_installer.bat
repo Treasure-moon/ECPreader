@@ -3,7 +3,7 @@ chcp 65001 >nul
 setlocal
 cd /d "%~dp0"
 
-set VERSION=1.4.0
+set VERSION=1.4.1
 
 if not exist ".venv\Scripts\python.exe" (
     echo 请先运行一次 start.bat 准备运行环境。

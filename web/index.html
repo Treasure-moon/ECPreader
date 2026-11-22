@@ -25,7 +25,9 @@
     <button class="btn ghost" id="btnHistory">历史记录</button>
     <button class="btn ghost" id="btnSettings">翻译设置</button>
     <button class="badge" id="engineBadge" title="点击修改翻译引擎">检测中…</button>
+    <button class="btn icon" id="btnSearch" title="查找原文或译文（Ctrl+F）">⌕</button>
     <button class="btn icon" id="btnTheme" title="切换主题">◐</button>
+    <button class="btn icon" id="btnAbout" title="关于 ECPreader / 获取帮助">?</button>
   </div>
 </header>
 
@@ -61,8 +63,7 @@
       <div class="feature"><div class="f-icon">⛨</div><h3>凭据本地加密</h3><p>API Key 使用 Windows DPAPI + AES-256-GCM 加密，永不落明文、永不上传。</p></div>
     </div>
 
-    <p class="feedback-line">问题反馈请联系：<a href="mailto:treasure_moon@163.com">treasure_moon@163.com</a></p>
-  </section>
+    </section>
 
   <section id="readerView" class="reader" hidden>
     <aside class="side" id="sidePanel">
@@ -125,6 +126,15 @@
     </div>
   </section>
 </main>
+
+<div id="searchBar" class="search-bar" hidden role="search" aria-label="文档内查找">
+  <span class="search-mark" aria-hidden="true">⌕</span>
+  <input id="searchInput" type="search" placeholder="查找原文或译文…" autocomplete="off" spellcheck="false" aria-label="查找内容">
+  <span id="searchCount" class="search-count" aria-live="polite"></span>
+  <button class="btn icon tiny" id="searchPrev" type="button" title="上一个（Shift+Enter）" aria-label="上一个">↑</button>
+  <button class="btn icon tiny" id="searchNext" type="button" title="下一个（Enter）" aria-label="下一个">↓</button>
+  <button class="btn icon tiny" id="searchClose" type="button" title="关闭（Esc）" aria-label="关闭查找">✕</button>
+</div>
 
 <div id="wordPopover" class="word-popover" hidden></div>
 
@@ -255,9 +265,7 @@
           API Key 单独加密存放在 vault.bin，主密钥由 Windows DPAPI 绑定当前账户，换账户或换电脑都无法解密。
           程序不包含任何埋点、遥测或云端同步。
         </p>
-        <div class="about" id="aboutBox"></div>
-        <p class="feedback-line">问题反馈请联系：<a href="mailto:treasure_moon@163.com">treasure_moon@163.com</a></p>
-      </section>
+        </section>
     </div>
     <footer class="dialog-foot">
       <span class="hint" id="settingsHint">修改后请点击「保存设置」</span>
@@ -266,6 +274,42 @@
         <button class="btn primary" id="btnSaveSettings">保存设置</button>
       </div>
     </footer>
+  </div>
+</div>
+
+<div id="aboutModal" class="modal" hidden>
+  <div class="modal-backdrop" data-close="about"></div>
+  <div class="dialog about-dialog" role="dialog" aria-modal="true" aria-label="关于 ECPreader">
+    <header class="dialog-head about-head">
+      <div class="about-brand">
+        <img src="/assets/img/logo-64.png" alt="">
+        <div>
+          <h2>ECPreader</h2>
+          <p class="sub">论文双语对照阅读器</p>
+        </div>
+      </div>
+      <button class="btn icon" data-close="about" aria-label="关闭">✕</button>
+    </header>
+    <div class="dialog-body about-body">
+      <p class="about-version">版本 <strong id="aboutVersion">__ECP_VERSION__</strong><span>本地运行 · 数据不出电脑 · 无遥测</span></p>
+      <p class="about-intro">把 PDF / Word 论文拖进窗口：左侧保留论文原貌，右侧在同一位置显示中文译文；也可以切换到逐句对照，选中句子两边同步高亮，双击单词查看词典释义和语境意译。</p>
+      <dl class="about-facts">
+        <div><dt>作者</dt><dd>Treasure_moon</dd></div>
+        <div><dt>邮箱</dt><dd><button class="link" data-external="mailto:treasure_moon@163.com">treasure_moon@163.com</button></dd></div>
+        <div><dt>项目地址</dt><dd><button class="link" data-external="https://github.com/Treasure-moon/ECPreader">github.com/Treasure-moon/ECPreader</button></dd></div>
+        <div><dt>开源协议</dt><dd>MIT</dd></div>
+      </dl>
+      <div class="about-star">
+        <span class="star-mark">★</span>
+        <p>如果 ECPreader 对你的论文阅读有帮助，欢迎到 GitHub 给项目点一个 Star，这是对作者最直接的鼓励，也能让更多需要的人找到它。</p>
+      </div>
+      <div class="about-actions">
+        <button class="btn primary" data-external="https://github.com/Treasure-moon/ECPreader">打开 GitHub 仓库</button>
+        <button class="btn ghost" data-external="https://github.com/Treasure-moon/ECPreader/releases/latest">查看最新版本</button>
+        <button class="btn ghost" data-external="mailto:treasure_moon@163.com">邮件反馈</button>
+      </div>
+      <p class="about-foot">文档解析：PyMuPDF / python-docx · 翻译：MyMemory / Google / Bing 与 OpenAI 兼容接口</p>
+    </div>
   </div>
 </div>
 

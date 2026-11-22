@@ -89,7 +89,20 @@ async def main() -> int:
         items = page.locator("#recentList .recent-item")
         count = await items.count()
         check("最近文档列表有内容", count >= 1, f"{count} 条")
-        check("首页显示反馈邮箱", "treasure_moon@163.com" in (await page.locator("#homeView").inner_text()))
+        check(
+            "首页不再散落反馈邮箱",
+            await page.locator(".feedback-line").count() == 0,
+        )
+        await page.locator("#btnAbout").click()
+        await page.wait_for_timeout(200)
+        about_text = await page.locator("#aboutModal").inner_text()
+        check("关于界面可打开", await page.locator("#aboutModal").is_visible())
+        check("关于界面显示版本", "1.4.1" in about_text, about_text[:40].replace("\n", " / "))
+        check("关于界面显示作者与邮箱", "Treasure_moon" in about_text and "treasure_moon@163.com" in about_text)
+        check("关于界面显示 GitHub 与 Star 引导", "github.com/Treasure-moon/ECPreader" in about_text and "Star" in about_text)
+        await page.locator('#aboutModal [data-close="about"]').last.click()
+        await page.wait_for_timeout(150)
+        check("关于界面可关闭", not await page.locator("#aboutModal").is_visible())
 
         target = None
         for index in range(count):
@@ -140,9 +153,13 @@ async def main() -> int:
         disabled = await page.locator("#btnBlockCopy").is_disabled()
         check("未选中时复制按钮禁用", disabled)
 
-        # 点击单词 → 段落联动 + 工具栏按钮可用
-        await page.locator(".textlayer .w[data-seq]").first.click()
-        await page.wait_for_timeout(200)
+        # 点击单词 → 段落联动 + 工具栏按钮可用（选一个确实有译文的段落）
+        await page.evaluate("""() => {
+          const word = [...document.querySelectorAll('.textlayer .w[data-seq]')]
+            .find((node) => document.querySelector(`.ov-block[data-seq="${node.dataset.seq}"]`));
+          word?.click();
+        }""")
+        await page.wait_for_timeout(250)
         active_ov = await page.locator(".ov-block.active").count()
         check("点击段落后译文高亮", active_ov >= 1, f"{active_ov}")
         check("选中段落后按钮可用", not await page.locator("#btnBlockCopy").is_disabled())
@@ -164,7 +181,13 @@ async def main() -> int:
         await page.evaluate(SELECT_WORDS)
         await page.wait_for_timeout(500)
         synced_zh = await page.locator(".ov-block [data-sid].sync").count()
+        active_en = await page.locator(".textlayer .w.active").count()
         check("选中英文后译文同步高亮", synced_zh >= 1, f"{synced_zh} 处")
+        check("选中英文后选中句高亮", active_en >= 1, f"{active_en} 词")
+        active_bg = await page.locator(".textlayer .w.active").first.evaluate(
+            "el => getComputedStyle(el).backgroundColor"
+        )
+        check("选中句使用灰色底", active_bg.startswith("rgba(96, 104, 120"), active_bg)
 
         # 工具栏复制选中内容
         await page.locator("#btnBlockCopy").click()
@@ -179,7 +202,60 @@ async def main() -> int:
         await page.evaluate(SELECT_CHINESE)
         await page.wait_for_timeout(500)
         synced_en = await page.locator(".textlayer .w.sync").count()
+        active_zh = await page.locator(".ov-block [data-sid].active").count()
         check("选中中文后英文同步高亮", synced_en >= 1, f"{synced_en} 词")
+        check("选中中文后选中句高亮", active_zh >= 1, f"{active_zh} 句")
+        active_zh_bg = await page.locator(".ov-block [data-sid].active").first.evaluate(
+            "el => getComputedStyle(el).backgroundColor"
+        )
+        check("中文选中句使用灰色底", active_zh_bg.startswith("rgba(96, 104, 120"), active_zh_bg)
+        check(
+            "选中中文时英文不再整段灰底",
+            await page.locator(".textlayer .w.active").count() == 0,
+        )
+        whole_sentence = await page.evaluate("""() => {
+          const active = document.querySelector('.ov-block [data-sid].active');
+          if (!active) return null;
+          const sid = active.dataset.sid;
+          const all = [...document.querySelectorAll(`.textlayer .w[data-sid="${sid}"]`)];
+          return { total: all.length, synced: all.filter((node) => node.classList.contains('sync')).length };
+        }""")
+        check(
+            "中文选词后对应整句英文联动",
+            bool(whole_sentence and whole_sentence["total"] > 0 and whole_sentence["total"] == whole_sentence["synced"]),
+            str(whole_sentence),
+        )
+
+        # 跨句选择：每一句单独高亮，不连成一条
+        cross = await page.evaluate("""() => {
+          const spans = [...document.querySelectorAll('.ov-block [data-sid]')]
+            .filter((span) => span.textContent.trim().length > 5);
+          const first = spans[0];
+          const second = spans.find((span) => span.dataset.sid !== first?.dataset.sid
+            && span.closest('.page-pair') === first?.closest('.page-pair'));
+          if (!first || !second) return null;
+          const range = document.createRange();
+          range.setStart(first.firstChild, 0);
+          range.setEnd(second.firstChild, Math.min(5, second.firstChild.length));
+          const selection = window.getSelection();
+          selection.removeAllRanges();
+          selection.addRange(range);
+          return { sids: [first.dataset.sid, second.dataset.sid] };
+        }""")
+        await page.wait_for_timeout(500)
+        if cross:
+            cross_active = await page.locator(".ov-block [data-sid].active").count()
+            separated = await page.evaluate("""() => {
+              const nodes = [...document.querySelectorAll('.ov-block [data-sid].active')];
+              return nodes.length >= 2 && nodes.every((node) => getComputedStyle(node).boxShadow !== 'none');
+            }""")
+            check("跨句选择按句分别高亮", cross_active >= 2, f"{cross_active} 句")
+            check("跨句高亮之间有分隔", separated)
+        else:
+            check("跨句选择按句分别高亮", False, "没有可测试的两句")
+            check("跨句高亮之间有分隔", False, "没有可测试的两句")
+        await page.evaluate("() => window.getSelection().removeAllRanges()")
+        await page.wait_for_timeout(200)
 
         # 双击查词（选一个纯英文单词，避免页码/编号）
         point = await page.evaluate("""() => {
@@ -252,14 +328,14 @@ async def main() -> int:
         await page.locator('#viewSwitch [data-view="layout"]').click()
         await page.wait_for_selector(".page-pair", timeout=20000)
 
-        # 设置页的数据目录与反馈邮箱
+        # 设置页的数据目录；作者邮箱已集中到关于界面
         await page.locator("#btnSettings").click()
         await page.wait_for_timeout(400)
         await page.locator('.tab[data-tab="data"]').click()
         await page.wait_for_timeout(200)
         data_path = (await page.locator("#dataDirPath").inner_text()).strip()
         check("数据与安全显示数据目录", len(data_path) > 3 and ("\\" in data_path or "/" in data_path), data_path[:40])
-        check("设置页显示反馈邮箱", "treasure_moon@163.com" in (await page.locator("#settingsModal .feedback-line").inner_text()))
+        check("设置页不再散落反馈邮箱", await page.locator("#settingsModal .feedback-line").count() == 0)
         await page.locator('#settingsModal .dialog-head [data-close="settings"]').click()
         await page.wait_for_timeout(200)
 

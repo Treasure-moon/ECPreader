@@ -10,6 +10,7 @@ let blocksByPage = new Map();
 let callbacks = {};
 let paneMode = 'dual';
 let zoom = 1;
+let bodySize = 10;
 let activeSeq = null;
 let resizeObserver = null;
 let pageObservers = [];
@@ -27,7 +28,16 @@ function place(node, bbox, pageMeta) {
 }
 
 function fontSizeCqw(block, pageMeta) {
-  const size = Number(block.size) || 10;
+  const original = Number(block.size) || bodySize;
+  // 译文覆盖层沿用原文字号，但标题/章节标题不能按原始大字号放大：
+  // 中文“一、引言”如果按 29pt 渲染，会明显溢出并盖住正文。
+  const cap =
+    block.type === 'title'
+      ? bodySize * 1.6
+      : block.type === 'heading'
+        ? bodySize * 1.25
+        : bodySize * 1.1;
+  const size = Math.min(original, cap);
   return Math.max(0.55, (size / pageMeta.w) * 100);
 }
 
@@ -189,21 +199,43 @@ function elementsOf(seq) {
   return [...document.querySelectorAll(`[data-seq="${seq}"]`)];
 }
 
+function cssEscape(value) {
+  if (window.CSS && CSS.escape) return CSS.escape(value);
+  return String(value).replace(/["\\]/g, '\\$&');
+}
+
+function hasTextSelection() {
+  const selection = window.getSelection();
+  if (!selection || selection.isCollapsed || !selection.toString().trim()) return false;
+  const anchor = selection.anchorNode;
+  return Boolean(anchor && paper.contains(anchor));
+}
+
 function selectSeq(seq, { scroll = false } = {}) {
   clearSelection();
   if (seq === null || seq === undefined) return;
   activeSeq = seq;
-  for (const node of elementsOf(seq)) node.classList.add('active');
+  // 只给覆盖层加轮廓，不要把整段每个英文单词都涂成灰色；
+  // 灰色会盖住选文联动时的黄色高亮。
+  for (const node of paper.querySelectorAll(`.ov-block[data-seq="${seq}"]`)) {
+    node.classList.add('active');
+  }
   callbacks.onActiveBlock?.(seq);
   if (scroll) {
-    const target = elementsOf(seq)[0];
+    const target = paper.querySelector(`.ov-block[data-seq="${seq}"]`) || elementsOf(seq)[0];
     target?.scrollIntoView({ block: 'center', behavior: 'smooth' });
   }
 }
 
+function clearSelectionMarks() {
+  paper
+    .querySelectorAll('.w.sync, .w.active, .ov-block [data-sid].sync, .ov-block [data-sid].active')
+    .forEach((node) => node.classList.remove('sync', 'active'));
+}
+
 export function clearSelection() {
-  for (const node of document.querySelectorAll('.w.active, .ov-block.active')) node.classList.remove('active');
-  if (activeSeq === null) return;
+  clearSelectionMarks();
+  paper.querySelectorAll('.ov-block.active').forEach((node) => node.classList.remove('active'));
   activeSeq = null;
 }
 
@@ -238,6 +270,7 @@ async function lookupAt(box, event) {
 
 function bindBox(box) {
   box.addEventListener('click', (event) => {
+    if (hasTextSelection()) return;
     const node = event.target.closest('[data-seq]');
     if (!node) {
       clearSelection();
@@ -255,9 +288,7 @@ function bindBox(box) {
 
 // --------------------------------------------------------------- 选区联动
 function clearSync() {
-  paper.querySelectorAll('.w.sync, .ov-block [data-sid].sync').forEach((node) => {
-    node.classList.remove('sync');
-  });
+  clearSelectionMarks();
 }
 
 function debounce(fn, wait) {
@@ -272,7 +303,7 @@ function handleSelection() {
   if (!doc || !paper.querySelector('.view-layout')) return;
   const selection = window.getSelection();
   if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
-    clearSync();
+    clearSelectionMarks();
     return;
   }
   const range = selection.getRangeAt(0);
@@ -281,53 +312,43 @@ function handleSelection() {
   const pane = startElement?.closest?.('.page-pane');
   if (!pane || !paper.contains(pane)) return;
 
-  clearSync();
+  clearSelectionMarks();
   const isSource = pane.classList.contains('src');
+  const selectedSelector = isSource ? '.textlayer .w' : '.ov-block [data-sid]';
+  const otherSelector = isSource ? '.ov-block [data-sid]' : '.textlayer .w';
+  const touched = [...pane.querySelectorAll(selectedSelector)].filter((node) => {
+    try {
+      return range.intersectsNode(node);
+    } catch {
+      return false;
+    }
+  });
+  if (!touched.length) return;
+
   const sids = new Set();
   let seq = null;
+  for (const node of touched) {
+    if (node.dataset.sid) sids.add(node.dataset.sid);
+    if (seq === null && node.dataset.seq) seq = Number(node.dataset.seq);
+    const block = node.closest('.ov-block');
+    if (seq === null && block?.dataset.seq) seq = Number(block.dataset.seq);
+  }
+  if (!sids.size) return;
 
-  if (isSource) {
-    const words = [...pane.querySelectorAll('.textlayer .w')].filter((node) => {
-      try {
-        return range.intersectsNode(node);
-      } catch {
-        return false;
-      }
-    });
-    if (!words.length) return;
-    for (const word of words) {
-      if (word.dataset.sid) sids.add(word.dataset.sid);
-      if (seq === null && word.dataset.seq) seq = Number(word.dataset.seq);
-    }
-    for (const sid of sids) {
-      paper.querySelectorAll(`.ov-block [data-sid="${sid}"]`).forEach((node) => {
-        node.classList.add('sync');
-      });
-    }
-  } else {
-    const spans = [...pane.querySelectorAll('.ov-block [data-sid]')].filter((node) => {
-      try {
-        return range.intersectsNode(node);
-      } catch {
-        return false;
-      }
-    });
-    if (!spans.length) return;
-    for (const span of spans) {
-      sids.add(span.dataset.sid);
-      const block = span.closest('.ov-block');
-      if (seq === null && block?.dataset.seq) seq = Number(block.dataset.seq);
-    }
-    for (const sid of sids) {
-      paper.querySelectorAll(`.textlayer .w[data-sid="${sid}"]`).forEach((node) => {
-        node.classList.add('sync');
-      });
-    }
+  // 逐句联动：选中句在原文侧用淡绿色，对应句在译文侧用黄色。
+  // 每一句单独上色，所以跨句选择时不会连成一条长高亮。
+  for (const sid of sids) {
+    const escaped = cssEscape(sid);
+    pane
+      .querySelectorAll(`${selectedSelector}[data-sid="${escaped}"]`)
+      .forEach((node) => node.classList.add('active'));
+    paper
+      .querySelectorAll(`${otherSelector}[data-sid="${escaped}"]`)
+      .forEach((node) => node.classList.add('sync'));
   }
 
   if (seq !== null) {
     activeSeq = seq;
-    for (const node of elementsOf(seq)) node.classList.add('active');
     callbacks.onActiveBlock?.(seq);
   }
 }
@@ -375,6 +396,7 @@ export function setPaneMode(mode) {
 export function renderLayout(docData, cbs = {}) {
   doc = docData;
   callbacks = cbs;
+  bodySize = Number(docData.meta?.body_size) || 10;
   pages = (docData.pages_meta || []).map((item) => ({ ...item }));
   if (!pages.length && docData.page_count) {
     pages = Array.from({ length: docData.page_count }, (_, index) => ({

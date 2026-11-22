@@ -183,6 +183,85 @@ def _order_items(items: list[dict[str, Any]], page_width: float) -> list[dict[st
     return unique
 
 
+def _union_bbox(first: list[float], second: list[float]) -> list[float]:
+    return [
+        round(min(first[0], second[0]), 2),
+        round(min(first[1], second[1]), 2),
+        round(max(first[2], second[2]), 2),
+        round(max(first[3], second[3]), 2),
+    ]
+
+
+def _merge_title_lines(blocks: list[dict[str, Any]], body_size: float) -> None:
+    """把被 PDF 拆成多个文本块的论文标题合并回一个标题。
+
+    很多 IEEE 模板的标题会按行拆块；原逻辑只把第一块标成 title，其余行
+    被当成 heading，导致一个标题在目录里出现好几次。
+    """
+    title_index = next(
+        (index for index, block in enumerate(blocks) if block.get("type") == "title"),
+        None,
+    )
+    if title_index is None:
+        return
+    title = blocks[title_index]
+    index = title_index + 1
+    while index < len(blocks):
+        nxt = blocks[index]
+        if nxt.get("page") != title.get("page"):
+            break
+        if nxt.get("type") not in ("heading", "title"):
+            break
+        if float(nxt.get("size") or 0) < body_size * 1.2:
+            break
+        if common.HEADING_MARKER_RE.match(nxt.get("text") or ""):
+            break
+        if not title.get("bbox") or not nxt.get("bbox"):
+            break
+        title["text"] = f"{title.get('text', '').strip()} {nxt.get('text', '').strip()}".strip()
+        title["bbox"] = _union_bbox(list(title["bbox"]), list(nxt["bbox"]))
+        title["size"] = max(float(title.get("size") or 0), float(nxt.get("size") or 0))
+        del blocks[index]
+
+
+def _is_heading_continuation(heading: dict[str, Any], nxt: dict[str, Any]) -> bool:
+    text = (nxt.get("text") or "").strip()
+    current = (heading.get("text") or "").strip()
+    if not text or not current:
+        return False
+    if nxt.get("page") != heading.get("page"):
+        return False
+    if nxt.get("type") not in ("paragraph", "heading"):
+        return False
+    if abs(float(nxt.get("size") or 0) - float(heading.get("size") or 0)) > 0.8:
+        return False
+    if current[-1:] in ".,;:?!":
+        return False
+    if text[-1:] in ".,;:?!" or len(text.split()) > 12:
+        return False
+    if common.HEADING_MARKER_RE.match(text):
+        return False
+    letters = [ch for ch in text if ch.isalpha()]
+    if not letters or not text.isupper():
+        return False
+    return len(text) <= 100
+
+
+def _merge_heading_continuations(blocks: list[dict[str, Any]]) -> None:
+    """合并跨文本块的章节标题，如 “II. ... POINT” + “SET REGISTRATION METHOD”。"""
+    index = 0
+    while index < len(blocks) - 1:
+        block = blocks[index]
+        nxt = blocks[index + 1]
+        if block.get("type") == "heading" and _is_heading_continuation(block, nxt):
+            block["text"] = f"{block.get('text', '').strip()} {nxt.get('text', '').strip()}".strip()
+            if block.get("bbox") and nxt.get("bbox"):
+                block["bbox"] = _union_bbox(list(block["bbox"]), list(nxt["bbox"]))
+            del blocks[index + 1]
+            continue
+        index += 1
+
+
 def parse_pdf(path: Path, filename: str) -> dict[str, Any]:
     document = pymupdf.open(str(path))
     try:
@@ -237,7 +316,7 @@ def parse_pdf(path: Path, filename: str) -> dict[str, Any]:
                     )
                     continue
 
-                text = item["text"].strip()
+                text = common.clean_heading_text(item["text"].strip())
                 if not text:
                     continue
                 if item["is_margin"]:
@@ -276,24 +355,6 @@ def parse_pdf(path: Path, filename: str) -> dict[str, Any]:
                     )
                     continue
 
-                if common._looks_like_formula(text, item["fonts"], item["italic_ratio"]):
-                    blocks.append(
-                        {
-                            **item_layout,
-                            "type": "formula",
-                            "level": 0,
-                            "page": page_index,
-                            "text": text,
-                            "note": "公式",
-                        }
-                    )
-                    continue
-
-                is_caption = bool(common.CAPTION_RE.match(text))
-                heading, level = common._looks_like_heading(
-                    text, item["size"], body_size, item["bold_ratio"]
-                )
-
                 if not seen_title and page_index == 1 and item["size"] >= body_size * 1.28:
                     blocks.append(
                         {
@@ -306,6 +367,26 @@ def parse_pdf(path: Path, filename: str) -> dict[str, Any]:
                         }
                     )
                     seen_title = True
+                    continue
+
+                is_caption = bool(common.CAPTION_RE.match(text))
+                heading, level = common._looks_like_heading(
+                    text, item["size"], body_size, item["bold_ratio"]
+                )
+
+                if not heading and common._looks_like_formula(
+                    text, item["fonts"], item["italic_ratio"]
+                ):
+                    blocks.append(
+                        {
+                            **item_layout,
+                            "type": "formula",
+                            "level": 0,
+                            "page": page_index,
+                            "text": text,
+                            "note": "公式",
+                        }
+                    )
                     continue
 
                 if is_caption:
@@ -336,6 +417,8 @@ def parse_pdf(path: Path, filename: str) -> dict[str, Any]:
         blocks = [
             b for b in blocks if b["type"] == "table" or (b.get("text") or "").strip()
         ]
+        _merge_title_lines(blocks, body_size)
+        _merge_heading_continuations(blocks)
         common.attach_segments(blocks)
         toc = common.build_toc(blocks)
 
@@ -364,6 +447,7 @@ def parse_pdf(path: Path, filename: str) -> dict[str, Any]:
                 "body_size": body_size,
                 "pages": len(pages_raw),
                 "format": "pdf",
+                "parser_version": 3,
                 "pages_meta": pages_meta,
             },
         }

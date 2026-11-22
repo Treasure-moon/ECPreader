@@ -195,13 +195,32 @@ class FreeTranslator:
             self._cache[key] = result
             return result
 
-        results = await asyncio.gather(*(one(t) for t in items), return_exceptions=True)
-        for result in results:
-            if isinstance(result, BaseException):
-                if isinstance(result, TranslationError):
-                    raise result
-                raise TranslationError("unknown", detail=str(result))
-        return [str(r) for r in results]
+        # 同一段里有很多句子时不要一次性打满免费接口：顺序发送，避免首轮
+        # 被限流后整段失败（用户看到的就是“第一次翻译失败，手动重译才行”）。
+        soft_errors = {
+            "rate_limit",
+            "timeout",
+            "network",
+            "upstream_error",
+            "bad_response",
+            "empty_result",
+        }
+        results: list[str] = []
+        for text in items:
+            try:
+                results.append(await one(text))
+            except TranslationError as exc:
+                if exc.code not in soft_errors:
+                    raise
+                await asyncio.sleep(0.6)
+                try:
+                    results.append(await one(text))
+                except TranslationError as retry_exc:
+                    if retry_exc.code not in soft_errors:
+                        raise
+                    # 单句仍然失败时保留原文，不让整个段落的译文全部丢失。
+                    results.append(text)
+        return results
 
     async def _ensure_translated(self, provider: str, text: str, result: str) -> str:
         """机翻原样返回英文时做一次兜底（标题编号、其他服务）。"""
@@ -306,7 +325,7 @@ class FreeTranslator:
                 body = (response.text or "").upper()
                 if "USED ALL AVAILABLE FREE TRANSLATIONS" in body or "QUOTA" in body:
                     raise TranslationError(
-                        "free_quota", detail="MyMemory 今日匿名额度已用完"
+                        "free_quota", detail="Google 免费翻译额度已用完"
                     )
                 raise TranslationError("rate_limit")
             if response.status_code >= 500:
@@ -362,7 +381,7 @@ class FreeTranslator:
                 body = (response.text or "").upper()
                 if "USED ALL AVAILABLE FREE TRANSLATIONS" in body or "QUOTA" in body:
                     raise TranslationError(
-                        "free_quota", detail="MyMemory 今日匿名额度已用完"
+                        "free_quota", detail="Bing 免费翻译额度已用完"
                     )
                 raise TranslationError("rate_limit")
             if response.status_code >= 500:

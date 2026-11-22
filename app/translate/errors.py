@@ -21,7 +21,7 @@ DEFAULT_MESSAGES: dict[str, dict[str, str]] = {
         "hint": "程序已自动退避重试。若持续失败，请在设置中把「并发数」降到 1–2 后重新翻译。",
     },
     "free_quota": {
-        "message": "免费接口的当日额度已用完",
+        "message": "免费接口的当日额度已用完，翻译已停止",
         "hint": "MyMemory 匿名模式每天约 5000 字符。可在「翻译设置 → 免费引擎」填写邮箱提高额度，或改用 AI 翻译。",
     },
     "model_not_found": {

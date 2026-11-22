@@ -92,6 +92,11 @@ def _init(conn: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_history_created ON history(created_at);
         """
     )
+    # 旧版本重新翻译会留下同一文档的多条记录；启动时只保留最后一条。
+    conn.execute(
+        "DELETE FROM history WHERE doc_id IS NOT NULL AND rowid NOT IN ("
+        "SELECT MAX(rowid) FROM history WHERE doc_id IS NOT NULL GROUP BY doc_id)"
+    )
     conn.commit()
 
 
@@ -154,6 +159,58 @@ def _block_key(block: dict[str, Any]) -> str:
     return "text|" + " ".join(str(block.get("text") or "").split()).lower()
 
 
+def _align_translation(
+    block: dict[str, Any], translation: dict[str, Any] | None
+) -> dict[str, Any] | None:
+    """把旧译文的 segment id 对齐到重新解析后的新 segment id。
+
+    重新解析会因合并标题/章节而改变 seq，译文文本本身能保留，但旧的
+    sid（如 b8s0）会和新块（b6s0）对不上；前端覆盖层就找不到句子，选区
+    联动也随之失效。按位置/已有 sid 做一次无损重映射。
+    """
+    if not translation or translation.get("status") != "done":
+        return translation
+    # 公式块不翻译；旧版本可能把公式当段落译过，重新解析后必须丢弃。
+    if block.get("type") == "formula":
+        return None
+    segments = translation.get("segments")
+    if not isinstance(segments, dict) or not segments:
+        return translation
+
+    if block.get("type") == "table":
+        expected = [
+            str(cell.get("sid"))
+            for row in block.get("cells") or []
+            for cell in row
+            if isinstance(cell, dict) and cell.get("sid")
+        ]
+    else:
+        expected = [
+            str(segment.get("sid"))
+            for segment in block.get("segments") or []
+            if isinstance(segment, dict) and segment.get("sid")
+        ]
+    if not expected:
+        return translation
+    if all(sid in segments for sid in expected):
+        return translation
+
+    values = list(segments.values())
+    aligned: dict[str, str] = {}
+    for sid in expected:
+        if sid in segments:
+            aligned[sid] = segments[sid]
+    for index, sid in enumerate(expected):
+        if sid in aligned or index >= len(values):
+            continue
+        aligned[sid] = values[index]
+    if not aligned:
+        return translation
+    updated = dict(translation)
+    updated["segments"] = aligned
+    return updated
+
+
 def replace_blocks(
     doc_id: str,
     *,
@@ -187,7 +244,13 @@ def replace_blocks(
             key = _block_key(block)
             translation = old_translations.get(key)
             if translation:
-                kept += 1
+                try:
+                    aligned = _align_translation(block, json.loads(translation))
+                    translation = _dump(aligned) if aligned else None
+                except json.JSONDecodeError:
+                    pass
+                if translation:
+                    kept += 1
             payload.append((doc_id, seq, _dump(block), translation))
         conn.executemany(
             "INSERT INTO blocks (doc_id,seq,data_json,tr_json) VALUES (?,?,?,?)", payload
@@ -234,7 +297,7 @@ def get_document(doc_id: str, *, with_blocks: bool = True) -> dict[str, Any] | N
             block = _load(row["data_json"], {})
             block["seq"] = row["seq"]
             tr = _load(row["tr_json"], None)
-            block["translation"] = tr
+            block["translation"] = _align_translation(block, tr)
             blocks.append(block)
         meta["blocks"] = blocks
     return meta
@@ -316,6 +379,8 @@ def add_history(
     entry_id = uuid.uuid4().hex[:12]
     conn = _connect()
     with _lock:
+        # 同一篇文档只保留最后一次翻译记录；重新翻译时旧记录自动替换。
+        conn.execute("DELETE FROM history WHERE doc_id=?", (doc_id,))
         conn.execute(
             "INSERT INTO history (id,doc_id,title,mode,engine,model,status,"
             "block_total,block_done,char_count,created_at,finished_at,error) "

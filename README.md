@@ -16,12 +16,21 @@
 
 | 文件 | 说明 |
 | --- | --- |
-| [ECPreader-Setup-1.4.0.exe](https://github.com/Treasure-moon/ECPreader/releases/latest/download/ECPreader-Setup-1.4.0.exe) | 安装版，推荐。可选安装路径、数据路径和快捷方式，可在「应用和功能」中卸载 |
+| [ECPreader-Setup-1.4.1.exe](https://github.com/Treasure-moon/ECPreader/releases/latest/download/ECPreader-Setup-1.4.1.exe) | 安装版，推荐。可选安装路径、数据路径和快捷方式，可在「应用和功能」中卸载 |
 | [ECPReader.exe](https://github.com/Treasure-moon/ECPreader/releases/latest/download/ECPReader.exe) | 免安装单文件版，双击运行 |
 
 Windows 10 / 11，不需要安装 Python。
 
 程序没有代码签名，首次运行时如果 Windows 提示「已保护你的电脑」，点「更多信息 → 仍要运行」即可。
+
+## 1.4.1 更新
+
+- 新增 `Ctrl+F` / 顶部 `⌕` 文档内查找：只高亮真正匹配的字符（输入 `pro` 只标 `pro`，不会整句铺色），`Enter` / `Shift+Enter` 跳转，原文和译文都支持。
+- 免费机翻额度耗尽时立即停止并提示，不再无限重试。
+- 优化启动速度；启动阶段连续双击不会弹出多个窗口，启动完成后仍可正常多开。
+- 原版对照视图划选时，选中的文字更突出，所在句变为灰色。
+- 同一文档重新翻译只保留最新一条历史；删除一条重复记录不会删除整篇文档。
+- 新增「关于」页，集中展示版本、作者、邮箱、源码和更新入口。
 
 ## 功能
 
@@ -29,6 +38,7 @@ Windows 10 / 11，不需要安装 Python。
 - **原版对照**：整页按原样渲染，中文按原坐标覆盖，公式、图片、双栏排版不会被拆乱。
 - **逐句对照**：正文重排成左右两栏，共享滚动位置，适合精读。
 - **划选联动**：在任一栏选中句子，另一栏同步高亮；双击单词就地查词。
+- **文档内查找**：`Ctrl+F` 精确查找原文或译文，只高亮匹配字符，可上下跳转。
 - **两种引擎**：免费机翻（MyMemory / Google / Bing），或 OpenAI 兼容的 AI 接口（DeepSeek、OpenAI、硅基流动、Ollama 等）。
 - **术语一致**：可维护术语表，AI 模式会结合上下文统一译法。
 - **可控成本**：按段分批翻译，失败可补译，单段可重译。
@@ -69,7 +79,7 @@ build_exe.bat
 build_installer.bat
 ```
 
-生成 `installer\dist\ECPreader-Setup-1.4.0.exe`（安装包，内含卸载程序）。
+生成 `installer\dist\ECPreader-Setup-1.4.1.exe`（安装包，内含卸载程序）。
 
 ## 数据与隐私
 

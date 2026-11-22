@@ -18,7 +18,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, BackgroundTasks, Body, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 
-from . import config, db, exporting, pages, security
+from . import config, db, exporting, security
 from .config import AI_PRESETS, FREE_PROVIDERS
 from .parsers import ParseError, parse_document
 from .translate import dictionary, pipeline
@@ -30,6 +30,18 @@ MAGIC = {".pdf": b"%PDF", ".docx": b"PK\x03\x04"}
 
 
 # ------------------------------------------------------------------ helpers
+def _pages():
+    """PyMuPDF 很重，延后到真正需要渲染/取词时再导入，缩短启动时间。"""
+    from . import pages
+
+    return pages
+
+
+def _call_pages(name: str, *args):
+    """在 to_thread 里调用，连同 PyMuPDF 的首次导入也放到工作线程。"""
+    return getattr(_pages(), name)(*args)
+
+
 def _decode_filename(name: str) -> str:
     if not name:
         return "document"
@@ -208,7 +220,7 @@ async def document_page(doc_id: str, page_no: int, dpi: int = 160) -> FileRespon
         raise HTTPException(status_code=404, detail="原始文件已丢失，请重新导入")
     try:
         path = await asyncio.to_thread(
-            pages.render_page_png, Path(stored), doc_id, page_no, dpi
+            _call_pages, "render_page_png", Path(stored), doc_id, page_no, dpi
         )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -227,7 +239,7 @@ async def document_page_words(doc_id: str, page_no: int) -> dict:
     document = db.get_document(doc_id)
     try:
         return await asyncio.to_thread(
-            pages.page_words, Path(stored), page_no, document.get("blocks") or []
+            _call_pages, "page_words", Path(stored), page_no, document.get("blocks") or []
         )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -263,7 +275,7 @@ async def reparse_document(doc_id: str) -> dict:
         meta=new_meta,
         title=result["title"],
     )
-    pages.clear_page_cache(doc_id)
+    _pages().clear_page_cache(doc_id)
     updated = db.get_document(doc_id)
     return {"document": _with_layout(updated), "kept": kept}
 
@@ -282,7 +294,7 @@ async def word_at(doc_id: str, payload: dict = Body(default={})) -> dict:
         y = float(payload.get("y") or 0)
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail="坐标参数不正确") from exc
-    hit = await asyncio.to_thread(pages.word_at, Path(stored), page_no, x, y)
+    hit = await asyncio.to_thread(_call_pages, "word_at", Path(stored), page_no, x, y)
     if not hit:
         raise HTTPException(
             status_code=404,
@@ -293,9 +305,9 @@ async def word_at(doc_id: str, payload: dict = Body(default={})) -> dict:
             },
         )
     document = db.get_document(doc_id)
-    block = pages.block_at((document or {}).get("blocks") or [], page_no, x, y)
+    block = _pages().block_at((document or {}).get("blocks") or [], page_no, x, y)
     paragraph = (block or {}).get("text") or ""
-    sentence = pages.sentence_around(paragraph, hit["word"]) if paragraph else hit["word"]
+    sentence = _pages().sentence_around(paragraph, hit["word"]) if paragraph else hit["word"]
     try:
         result = await dictionary.lookup(hit["word"], sentence, paragraph)
     except TranslationError as exc:
@@ -316,7 +328,7 @@ def delete_all_documents() -> dict:
     for path in stored_files:
         Path(path).unlink(missing_ok=True)
         doc_id = Path(path).stem
-        pages.clear_page_cache(doc_id)
+        _pages().clear_page_cache(doc_id)
     return {"ok": True, "deleted": len(documents)}
 
 
@@ -329,7 +341,7 @@ def delete_document(doc_id: str) -> dict:
     db.delete_document(doc_id)
     if stored:
         Path(stored).unlink(missing_ok=True)
-    pages.clear_page_cache(doc_id)
+    _pages().clear_page_cache(doc_id)
     return {"ok": True}
 
 
@@ -577,6 +589,28 @@ def system_info() -> dict:
         "db_size": size,
         "protection": security.VAULT.status()["protection"],
     }
+
+
+EXTERNAL_LINKS = {
+    "https://github.com/Treasure-moon/ECPreader",
+    "https://github.com/Treasure-moon/ECPreader/releases/latest",
+    "mailto:treasure_moon@163.com",
+}
+
+
+@router.post("/system/open-external")
+def open_external(payload: dict = Body(default={})) -> dict:
+    """只允许打开项目仓库、更新页和作者邮箱，避免被页面用作任意 URL 跳板。"""
+    url = str(payload.get("url") or "").strip()
+    if url not in EXTERNAL_LINKS:
+        raise HTTPException(status_code=400, detail="不支持的外部链接")
+    try:
+        import webbrowser
+
+        opened = webbrowser.open(url)
+        return {"ok": bool(opened)}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"无法打开链接：{exc}") from exc
 
 
 @router.post("/system/reveal")

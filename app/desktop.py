@@ -26,7 +26,7 @@ def available() -> bool:
     return True
 
 
-def run_window(url: str) -> None:
+def run_window(url: str, on_ready=None) -> None:
     """打开应用窗口并阻塞到窗口关闭；不返回则说明窗口无法创建。"""
     import webview
 
@@ -41,6 +41,12 @@ def run_window(url: str) -> None:
         # 导致逐句对照里根本划选不了文字；这里必须显式打开。
         text_select=True,
     )
+    if on_ready is not None:
+        try:
+            # 窗口内容真正加载完成后再释放启动互斥，避免这段空窗期被重复双击。
+            window.events.loaded += lambda *_: on_ready()
+        except Exception:
+            pass
     selftest = os.environ.get("ECP_DESKTOP_SELFTEST", "")
     if selftest:
         def _close_after() -> None:
@@ -74,7 +80,7 @@ def _edge_executable() -> Path | None:
     return None
 
 
-def run_edge_app(url: str) -> bool:
+def run_edge_app(url: str, on_ready=None) -> bool:
     """没有 WebView2 时，用 Edge 的「应用模式」开一个无地址栏窗口。"""
     edge = _edge_executable()
     if not edge:
@@ -95,6 +101,8 @@ def run_edge_app(url: str) -> bool:
         )
     except OSError:
         return False
+    if on_ready is not None:
+        on_ready()
     try:
         process.wait()
     finally:
@@ -103,14 +111,14 @@ def run_edge_app(url: str) -> bool:
     return True
 
 
-def launch(url: str) -> str:
+def launch(url: str, on_ready=None) -> str:
     """打开桌面窗口，返回实际使用的模式：webview / edge。"""
     if available():
         try:
-            run_window(url)
+            run_window(url, on_ready=on_ready)
             return "webview"
         except Exception as exc:  # pragma: no cover - 依赖本机运行库
             print(f"[desktop] pywebview 启动失败，改用 Edge 应用窗口：{exc}")
-    if run_edge_app(url):
+    if run_edge_app(url, on_ready=on_ready):
         return "edge"
     raise RuntimeError("无法创建桌面窗口（缺少 WebView2 与 Edge）")

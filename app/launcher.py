@@ -20,6 +20,7 @@ from pathlib import Path
 import uvicorn
 
 from app import config, desktop
+from app.startup_guard import StartupGuard
 
 BANNER = r"""
   ______ _____ _____    ____                 _
@@ -142,57 +143,76 @@ def main() -> None:
         except Exception:
             pass
 
-    # 已经有一个实例在跑：直接连上去，避免开第二份数据库。
-    # 由「更改数据目录 → 立即重启」拉起的新实例要跳过这一步，否则会连到即将退出的旧实例。
-    restarting = os.environ.get("ECP_RESTARTED") == "1"
-    preferred_url = f"http://{args.host}:{args.port}/"
-    if not restarting and not args.no_browser and not args.browser and _is_ecp_instance(preferred_url):
-        print(f"  ECPreader 已在运行：{preferred_url}")
-        _log(f"复用已运行实例 {preferred_url}")
-        try:
-            desktop.launch(preferred_url)
-        except Exception:
-            webbrowser.open(preferred_url)
-        return
-
-    port = _pick_port(args.host, args.port)
-    url = f"http://{args.host}:{port}/"
-    server, thread = _start_server(args.host, port)
-    _log(f"服务已启动 {url}")
-
-    console = sys.stdout is not None and sys.stdout.isatty()
-    if console:
-        print(BANNER)
-        print(f"  地址：{url}")
-        print(f"  数据目录：{config.DATA_DIR}")
-        print("  凭据已使用 Windows DPAPI + AES-256-GCM 加密，仅本机可解密")
-        print("  关闭窗口即退出程序\n")
-
-    if args.no_browser:
-        try:
-            _keep_alive(server, thread)
-        except KeyboardInterrupt:
-            pass
-        return
-
-    if args.browser or not desktop.available():
-        webbrowser.open(url)
-        print("  已在浏览器中打开；关闭本窗口或按 Ctrl+C 退出。")
-        _keep_alive(server, thread)
+    # 只保护“启动中”的这段时间：连续双击时后一个进程直接退出；
+    # 服务与窗口就绪后会释放，之后仍可按正常方式多开窗口。
+    guard = StartupGuard(config.DATA_DIR / ".starting")
+    if not guard.acquire():
+        _log("检测到另一个实例正在启动，忽略本次重复启动")
         return
 
     try:
-        mode = desktop.launch(url)
-        _log(f"桌面窗口已打开（{mode}）")
-    except Exception as exc:  # pragma: no cover - 依赖本机运行库
-        _log(f"桌面窗口失败，回退浏览器：{exc}")
-        print(f"  无法打开桌面窗口（{exc}），已改用浏览器。")
-        webbrowser.open(url)
-        _keep_alive(server, thread)
-        return
+        # 已经有一个实例在跑：直接连上去，避免开第二份数据库。
+        # 由「更改数据目录 → 立即重启」拉起的新实例要跳过这一步，否则会连到即将退出的旧实例。
+        restarting = os.environ.get("ECP_RESTARTED") == "1"
+        preferred_url = f"http://{args.host}:{args.port}/"
+        if not restarting and not args.no_browser and not args.browser and _is_ecp_instance(preferred_url):
+            guard.release()
+            print(f"  ECPreader 已在运行：{preferred_url}")
+            _log(f"复用已运行实例 {preferred_url}")
+            try:
+                desktop.launch(preferred_url)
+            except Exception:
+                webbrowser.open(preferred_url)
+            return
+
+        port = _pick_port(args.host, args.port)
+        url = f"http://{args.host}:{port}/"
+        server, thread = _start_server(args.host, port)
+        _log(f"服务已启动 {url}")
+
+        console = sys.stdout is not None and sys.stdout.isatty()
+        if console:
+            print(BANNER)
+            print(f"  地址：{url}")
+            print(f"  数据目录：{config.DATA_DIR}")
+            print("  凭据已使用 Windows DPAPI + AES-256-GCM 加密，仅本机可解密")
+            print("  关闭窗口即退出程序\n")
+
+        if args.no_browser:
+            guard.release()
+            try:
+                _keep_alive(server, thread)
+            except KeyboardInterrupt:
+                pass
+            return
+
+        if args.browser or not desktop.available():
+            guard.release()
+            webbrowser.open(url)
+            print("  已在浏览器中打开；关闭本窗口或按 Ctrl+C 退出。")
+            _keep_alive(server, thread)
+            return
+
+        # 桌面窗口真正加载完成前继续持锁；WebView 没有回调时 8 秒兜底释放。
+        timer = threading.Timer(8.0, guard.release)
+        timer.daemon = True
+        timer.start()
+        try:
+            mode = desktop.launch(url, on_ready=guard.release)
+            _log(f"桌面窗口已打开（{mode}）")
+        except Exception as exc:  # pragma: no cover - 依赖本机运行库
+            _log(f"桌面窗口失败，回退浏览器：{exc}")
+            print(f"  无法打开桌面窗口（{exc}），已改用浏览器。")
+            webbrowser.open(url)
+            _keep_alive(server, thread)
+            return
+        finally:
+            timer.cancel()
+            guard.release()
+            server.should_exit = True
+            thread.join(timeout=4)
     finally:
-        server.should_exit = True
-        thread.join(timeout=4)
+        guard.release()
 
 
 if __name__ == "__main__":

@@ -19,7 +19,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 APP_NAME = "ECPreader"
-APP_VERSION = "1.4.0"
+APP_VERSION = "1.4.1"
 NAVY = "#1B2450"
 CREAM = "#FAF6EA"
 MINT = "#2ED9C3"
