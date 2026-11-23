@@ -93,11 +93,11 @@ async def main() -> int:
             "首页不再散落反馈邮箱",
             await page.locator(".feedback-line").count() == 0,
         )
-        await page.locator("#btnAbout").click()
+        await page.locator("#btnAboutTop").click()
         await page.wait_for_timeout(200)
         about_text = await page.locator("#aboutModal").inner_text()
         check("关于界面可打开", await page.locator("#aboutModal").is_visible())
-        check("关于界面显示版本", "1.4.1" in about_text, about_text[:40].replace("\n", " / "))
+        check("关于界面显示版本", "1.5.0" in about_text, about_text[:40].replace("\n", " / "))
         check("关于界面显示作者与邮箱", "Treasure_moon" in about_text and "treasure_moon@163.com" in about_text)
         check("关于界面显示 GitHub 与 Star 引导", "github.com/Treasure-moon/ECPreader" in about_text and "Star" in about_text)
         await page.locator('#aboutModal [data-close="about"]').last.click()
@@ -329,6 +329,8 @@ async def main() -> int:
         await page.wait_for_selector(".page-pair", timeout=20000)
 
         # 设置页的数据目录；作者邮箱已集中到关于界面
+        await page.locator("#btnMore").click()
+        await page.wait_for_timeout(150)
         await page.locator("#btnSettings").click()
         await page.wait_for_timeout(400)
         await page.locator('.tab[data-tab="data"]').click()

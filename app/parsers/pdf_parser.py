@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import re
 import statistics
+from html import unescape
 from pathlib import Path
 from typing import Any
 
@@ -457,7 +458,10 @@ def parse_pdf(path: Path, filename: str) -> dict[str, Any]:
 
 
 def _clean_title(raw: str) -> str:
-    text = (raw or "").strip()
+    # 有些 PDF 的元数据标题是 XML 转义过的（例如把连接号写成 &#x2013;），
+    # 直接存进数据库会让标签页和首页显示成实体文本。
+    text = unescape(raw or "").strip()
+    text = re.sub(r"\s+", " ", text)
     if not text:
         return ""
     lowered = text.lower()

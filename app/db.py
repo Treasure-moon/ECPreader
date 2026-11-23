@@ -6,6 +6,7 @@ import sqlite3
 import threading
 import uuid
 from datetime import datetime
+from html import unescape
 from typing import Any, Iterable
 
 from . import config
@@ -16,6 +17,11 @@ _conn: sqlite3.Connection | None = None
 
 def now() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def clean_title(value: Any) -> str:
+    """统一清洗标题：历史数据里可能存着 PDF 元数据带的 XML 实体。"""
+    return " ".join(unescape(str(value or "")).split())
 
 
 def _connect() -> sqlite3.Connection:
@@ -276,6 +282,7 @@ def get_document_meta(doc_id: str) -> dict[str, Any] | None:
     if not row:
         return None
     data = dict(row)
+    data["title"] = clean_title(data.get("title"))
     data["meta"] = _load(data.pop("meta_json"), {})
     data["toc"] = _load(data.pop("toc_json"), [])
     return data
@@ -318,7 +325,10 @@ def list_documents(limit: int = 50, query: str = "") -> list[dict[str, Any]]:
     params.append(limit)
     with _lock:
         rows = conn.execute(sql, params).fetchall()
-    return [dict(r) for r in rows]
+    documents = [dict(r) for r in rows]
+    for document in documents:
+        document["title"] = clean_title(document.get("title"))
+    return documents
 
 
 def delete_document(doc_id: str) -> None:
@@ -444,7 +454,10 @@ def list_history(limit: int = 100, query: str = "") -> list[dict[str, Any]]:
     params.append(limit)
     with _lock:
         rows = conn.execute(sql, params).fetchall()
-    return [dict(r) for r in rows]
+    entries = [dict(r) for r in rows]
+    for entry in entries:
+        entry["title"] = clean_title(entry.get("title"))
+    return entries
 
 
 def clear_history() -> None:

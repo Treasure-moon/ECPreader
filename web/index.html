@@ -14,22 +14,92 @@
 </head>
 <body>
 
-<header class="topbar">
-  <div class="brand" id="brandHome" title="返回首页">
+<header class="topbar" id="topbar">
+  <button class="brand" id="brandHome" title="首页 · 新建标签页（Alt+T）">
     <img class="logo" src="/assets/img/logo-small.svg" alt="ECPreader">
-    <div class="brand-text"><strong>ECPreader</strong><span>论文双语对照阅读器</span></div>
+    <span class="brand-name">ECPreader</span>
+  </button>
+
+  <div class="doc-tabs" id="tabstrip">
+    <div class="doc-tab-list" id="tabList" role="tablist" aria-label="打开的文档"></div>
+    <button class="doc-tab-new" id="btnNewTab" title="新建标签页（Alt+T）" aria-label="新建标签页">＋</button>
   </div>
-  <div class="doc-title" id="docTitle"></div>
+
   <div class="top-actions">
-    <button class="btn ghost" id="btnOpen">打开文档</button>
-    <button class="btn ghost" id="btnHistory">历史记录</button>
-    <button class="btn ghost" id="btnSettings">翻译设置</button>
     <button class="badge" id="engineBadge" title="点击修改翻译引擎">检测中…</button>
-    <button class="btn icon" id="btnSearch" title="查找原文或译文（Ctrl+F）">⌕</button>
-    <button class="btn icon" id="btnTheme" title="切换主题">◐</button>
-    <button class="btn icon" id="btnAbout" title="关于 ECPreader / 获取帮助">?</button>
+    <button class="btn icon" id="btnAboutTop" title="关于 ECPreader / 获取帮助">?</button>
+    <button class="btn icon" id="btnMore" title="设置与关于">⋮</button>
   </div>
 </header>
+
+<div class="toolbar" id="readerToolbar">
+  <button class="btn small primary" id="btnTranslateAll">翻译全文</button>
+  <div class="progress-wrap" id="progressWrap" hidden>
+    <span class="progress-text" id="progressText"></span>
+    <div class="progress-bar"><span id="progressBar"></span></div>
+    <button class="btn icon tiny" id="btnCancelJob" title="取消翻译">✕</button>
+  </div>
+  <div class="viewbar" id="viewBar">
+    <button class="btn icon side-toggle is-active" id="btnToggleSideTop" title="目录" aria-controls="sidePanel" aria-expanded="true">☰</button>
+    <div class="segmented" id="viewSwitch" role="group" aria-label="视图模式">
+      <button class="seg-btn active" data-view="layout" title="按 PDF 原始排版显示，图片与公式保持原样">原版</button>
+      <button class="seg-btn" data-view="flow" title="逐句重排，便于划选句子对照">逐句</button>
+    </div>
+    <div class="segmented" id="paneSwitch" role="group" aria-label="显示范围">
+      <button class="seg-btn active" data-pane="dual" title="原文与译文并排">双页</button>
+      <button class="seg-btn" data-pane="src" title="只看原文">原文</button>
+      <button class="seg-btn" data-pane="tgt" title="只看译文">译文</button>
+    </div>
+    <div class="zoom-ctl" id="zoomCtl">
+      <button class="btn icon tiny" id="zoomOut" title="缩小">−</button>
+      <span id="zoomLabel">100%</span>
+      <button class="btn icon tiny" id="zoomIn" title="放大">＋</button>
+      <button class="btn icon tiny" id="zoomFit" title="恢复为适应宽度">⤢</button>
+    </div>
+  </div>
+  <div class="action-group">
+    <button class="btn icon" id="btnBlockCopy" title="复制选中内容；没有选中时复制整段中英对照" disabled>⧉</button>
+    <button class="btn icon" id="btnBlockRetranslate" title="重新翻译当前选中或点选的段落" disabled>↻</button>
+    <button class="btn icon" id="btnSearch" title="查找原文或译文（Ctrl+F）">⌕</button>
+    <button class="btn icon" id="btnFocus" title="全屏阅读（Esc 退出）">⛶</button>
+    <button class="btn icon" id="btnDocMore" title="本篇文档：字号、重译、导出">⋯</button>
+  </div>
+</div>
+
+<div id="moreMenu" class="menu more-menu" hidden role="menu" aria-label="设置与关于">
+  <button id="btnOpen" role="menuitem">打开文档…</button>
+  <button id="btnHistory" role="menuitem">历史记录</button>
+  <div class="menu-sep"></div>
+  <label class="menu-row"><span>翻译引擎</span>
+    <select id="engineSelect">
+      <option value="free">传统机翻</option>
+      <option value="ai">AI 翻译</option>
+    </select>
+  </label>
+  <button id="btnSettings" role="menuitem">翻译设置…</button>
+  <div class="menu-sep"></div>
+  <button id="btnTheme" role="menuitem">切换主题</button>
+</div>
+
+<div id="docMenu" class="menu more-menu" hidden role="menu" aria-label="本篇文档">
+  <div class="menu-row"><span>正文字号</span>
+    <div class="font-ctl">
+      <button class="btn icon tiny" id="fontMinus" title="减小字号">−</button>
+      <span id="fontLabel">16</span>
+      <button class="btn icon tiny" id="fontPlus" title="增大字号">＋</button>
+    </div>
+  </div>
+  <div class="menu-sep"></div>
+  <button id="btnRetranslate" role="menuitem">重新翻译全文</button>
+  <button id="btnExport" role="menuitem">导出为…</button>
+</div>
+
+<div class="focus-bar" id="focusBar" hidden>
+  <button class="btn icon" id="btnFocusSearch" title="查找（Ctrl+F）">⌕</button>
+  <button class="btn icon" id="btnFocusToc" title="目录">☰</button>
+  <button class="btn small ghost" id="btnFocusExit" title="退出全屏（Esc）">退出全屏 · Esc</button>
+</div>
+<div class="focus-edge" id="focusEdge" title="移到屏幕左边缘唤出目录" hidden></div>
 
 <main id="app">
   <section id="homeView" class="home">
@@ -58,8 +128,10 @@
 
     <div class="feature-grid">
       <div class="feature"><div class="f-icon">⇄</div><h3>段落级双向对齐</h3><p>以句子为最小对齐单元，左右两栏共享同一滚动轴，原文与译文始终同行。</p></div>
-      <div class="feature"><div class="f-icon">◎</div><h3>选中即对照</h3><p>在任一栏选中内容，另一栏对应句子即时高亮；选中后可用顶部「重译此段」单独重译。</p></div>
+      <div class="feature"><div class="f-icon">◎</div><h3>选中即对照</h3><p>在任一栏选中内容，另一栏对应句子即时高亮；选中后可用顶部 ↻ 单独重译。</p></div>
       <div class="feature"><div class="f-icon">“”</div><h3>单词释义</h3><p>选中单个英文单词，查看音标、词典释义、当前语境义与整句意译。</p></div>
+      <div class="feature"><div class="f-icon">⧉</div><h3>多标签页</h3><p>像浏览器一样同时打开多篇论文，各自独立翻译、独立滚动，互不打断。</p></div>
+      <div class="feature"><div class="f-icon">⛶</div><h3>全屏阅读</h3><p>隐藏所有界面元素专注阅读，Esc 退出；左侧可随时唤出目录，Ctrl+F 照常查找。</p></div>
       <div class="feature"><div class="f-icon">⛨</div><h3>凭据本地加密</h3><p>API Key 使用 Windows DPAPI + AES-256-GCM 加密，永不落明文、永不上传。</p></div>
     </div>
 
@@ -72,51 +144,6 @@
       <div class="side-foot" id="docMeta"></div>
     </aside>
     <div class="reader-main">
-      <div class="reader-toolbar">
-        <div class="progress-wrap" id="progressWrap" hidden>
-          <div class="progress-text" id="progressText">准备翻译…</div>
-          <div class="progress-bar"><span id="progressBar"></span></div>
-          <button class="link" id="btnCancelJob">取消</button>
-        </div>
-        <div class="toolbar-right" id="toolbarRight">
-          <button class="btn small primary" id="btnTranslateAll">翻译全文</button>
-          <button class="btn small ghost" id="btnRetranslate">重新翻译</button>
-          <div class="select-wrap">
-            <label for="engineSelect">引擎</label>
-            <select id="engineSelect">
-              <option value="free">传统机翻</option>
-              <option value="ai">AI 翻译</option>
-            </select>
-          </div>
-          <button class="btn small ghost" id="btnExport">导出</button>
-          <button class="btn small ghost" id="btnBlockRetranslate" disabled title="重新翻译当前选中或点选的段落">重译此段</button>
-          <button class="btn small ghost" id="btnBlockCopy" disabled title="复制选中的文字；没有选中时复制整段中英对照">复制</button>
-          <div class="font-ctl" title="正文字号">
-            <button class="btn icon tiny" id="fontMinus">−</button>
-            <span id="fontLabel">16</span>
-            <button class="btn icon tiny" id="fontPlus">＋</button>
-          </div>
-        </div>
-      </div>
-      <div class="viewbar" id="viewBar">
-        <button class="btn small ghost side-toggle is-active" id="btnToggleSideTop" title="收起目录侧栏" aria-controls="sidePanel" aria-expanded="true">☰ 目录</button>
-        <div class="segmented" id="viewSwitch" role="group" aria-label="视图模式">
-          <button class="seg-btn active" data-view="layout" title="按 PDF 原始排版显示，图片与公式保持原样">原版对照</button>
-          <button class="seg-btn" data-view="flow" title="逐句重排，便于划选句子对照">逐句对照</button>
-        </div>
-        <div class="segmented" id="paneSwitch" role="group" aria-label="显示范围">
-          <button class="seg-btn active" data-pane="dual">双页</button>
-          <button class="seg-btn" data-pane="src">只看原文</button>
-          <button class="seg-btn" data-pane="tgt">只看译文</button>
-        </div>
-        <div class="zoom-ctl" id="zoomCtl">
-          <button class="btn icon tiny" id="zoomOut" title="缩小">−</button>
-          <span id="zoomLabel">100%</span>
-          <button class="btn icon tiny" id="zoomIn" title="放大">＋</button>
-          <button class="btn small ghost" id="zoomFit" title="恢复为适应宽度">适应宽度</button>
-        </div>
-        <div class="viewbar-hint" id="viewHint">点击段落联动 · 双击单词查释义</div>
-      </div>
       <div class="colhead" id="colhead">
         <div class="colhead-pad"></div>
         <div>English · 原文</div>
