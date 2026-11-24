@@ -263,6 +263,157 @@ def _merge_heading_continuations(blocks: list[dict[str, Any]]) -> None:
         index += 1
 
 
+# 页面上/下边缘这一段通常是页眉页脚（页码、刊名、期刊卷期）。
+PAGE_BAND = 0.12
+
+
+def _demoted_type(text: str, level: int) -> str | None:
+    """给「被误判成标题」的块挑一个更合适的类型；不是误判就返回 None。"""
+    stripped = (text or "").strip()
+    if not stripped:
+        return "paragraph"
+    if common.TOC_CAPTION_RE.match(stripped) or common.CAPTION_RE.match(stripped):
+        return "caption"
+    if any(ch in common.TOC_MATH_CHARS for ch in stripped):
+        return "formula"
+    # 作者行：一串逗号分隔的姓名 + 单位角标。
+    if stripped.count(",") >= 4:
+        return "paragraph"
+    words = re.findall(r"[A-Za-z]{2,}", stripped)
+    cjk = bool(re.search(r"[\u4e00-\u9fff]", stripped))
+    if not words and not cjk:
+        # “1 N”“(a)”“12” 这类图片刻度或子图标签，不是章节。
+        return "formula"
+    if common.looks_like_tick_label(stripped):
+        return "paragraph"
+    return None
+
+
+def _prune_heading_noise(
+    blocks: list[dict[str, Any]], page_heights: list[float]
+) -> None:
+    """把误判成章节标题的页眉、图注、公式残片、作者行改回正常类型。
+
+    目录只收 heading/title，所以这里必须就地改类型，阅读区也跟着一起干净。
+    """
+    heights = {index + 1: height for index, height in enumerate(page_heights)}
+
+    def in_band(block: dict[str, Any]) -> bool:
+        height = heights.get(block.get("page")) or 0.0
+        bbox = block.get("bbox") or []
+        if height <= 0 or len(bbox) < 4:
+            return False
+        ratio = float(bbox[1]) / height
+        return ratio <= PAGE_BAND or ratio >= 1 - PAGE_BAND
+
+    # 1) 每页重复的页眉：文字归一化后出现在 ≥3 页的上下边缘。
+    #    页眉可能被识别成 heading、paragraph 甚至 reference，所以按文字判断，
+    #    不限定原来的类型；只要求短（页眉不会很长）且落在页边。
+    page_sets: dict[str, set] = {}
+    for block in blocks:
+        if block.get("type") in ("table", "formula") or not in_band(block):
+            continue
+        text = (block.get("text") or "").strip()
+        if len(text) > 160:
+            continue
+        key = common.loose_toc_key(text)
+        if len(key) >= 8:
+            page_sets.setdefault(key, set()).add(block.get("page"))
+    running = {key for key, pages in page_sets.items() if len(pages) >= 3}
+
+    # 2) 论文标题上方那一行（期刊名、卷期、DOI）同样是页眉。
+    title_index = next(
+        (index for index, block in enumerate(blocks) if block.get("type") == "title"),
+        None,
+    )
+
+    for index, block in enumerate(blocks):
+        if block.get("type") in ("table", "formula"):
+            continue
+        text = block.get("text") or ""
+        key = common.loose_toc_key(text)
+        if key in running and in_band(block):
+            if block.get("type") != "title":
+                block["type"] = "header"
+                block["level"] = 0
+                block["note"] = "页眉"
+            continue
+        if block.get("type") not in ("heading", "title"):
+            continue
+        if block.get("type") == "title":
+            continue
+        if title_index is not None and index < title_index and in_band(block):
+            block["type"] = "header"
+            block["level"] = 0
+            block["note"] = "页眉"
+            continue
+        demoted = _demoted_type(text, int(block.get("level") or 0))
+        if demoted:
+            block["type"] = demoted
+            block["level"] = 0
+
+
+AUTHOR_AFFIX_RE = re.compile(
+    r"[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?\s+(?<![A-Za-z])[a-z](?![a-z])"
+    r"(?:\s*,\s*[a-z](?![a-z]))?\s*\*?"
+)
+
+
+def _looks_like_author_line(text: str) -> bool:
+    """作者行：“Zhiyuan Li a, Fengxiang Jin a,b,*, ...”。
+
+    必须真的是「姓名 + 单字母单位角标」，否则正文里的 “The authors …” 之类
+    也会被当成作者行。
+    """
+    stripped = (text or "").strip()
+    if not stripped or len(stripped) > 400:
+        return False
+    if stripped.count(",") < 2:
+        return False
+    return len(AUTHOR_AFFIX_RE.findall(stripped)) >= 2
+
+
+def _pick_title_item(
+    items: list[dict[str, Any]], body_size: float, page_width: float
+) -> tuple | None:
+    """在第一页里挑论文标题。
+
+    “第一个字号够大的块”在期刊版式里很容易落到刊名/页眉上（Elsevier 的刊名
+    甚至比标题还大一点）。标题紧挨着作者行，用这一点当主要判据。
+    """
+    candidates: list[tuple[float, int, tuple]] = []
+    for index, item in enumerate(items):
+        if item["kind"] != "text" or item["is_margin"]:
+            continue
+        text = (item.get("text") or "").strip()
+        if len(text) < 10 or len(text) > 300:
+            continue
+        if common.CAPTION_RE.match(text) or common.TOC_CAPTION_RE.match(text):
+            continue
+        # 带章节编号的块一定是章节标题；首字下沉还会把字号顶到很大。
+        if common.HEADING_MARKER_RE.match(text) or common._heading_marker_level(text):
+            continue
+        if float(item.get("size") or 0) < body_size * 1.2:
+            continue
+        if text.lower().rstrip(".:") in common.SECTION_NAMES:
+            continue
+        bbox = item["bbox"]
+        if page_width > 0 and (float(bbox[2]) - float(bbox[0])) < page_width * 0.35:
+            continue
+        score = float(item.get("size") or 0) / max(body_size, 1.0) + len(text) / 200.0
+        for follower in items[index + 1 : index + 4]:
+            if follower["kind"] == "text" and _looks_like_author_line(
+                follower.get("text") or ""
+            ):
+                score += 12.0
+                break
+        candidates.append((score, index, tuple(float(v) for v in bbox)))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda entry: (-entry[0], entry[1]))
+    return candidates[0][2]
+
+
 def parse_pdf(path: Path, filename: str) -> dict[str, Any]:
     document = pymupdf.open(str(path))
     try:
@@ -294,6 +445,11 @@ def parse_pdf(path: Path, filename: str) -> dict[str, Any]:
         toc: list[dict[str, Any]] = []
         in_references = False
         seen_title = False
+        title_bbox = (
+            _pick_title_item(pages_raw[0], body_size, page_sizes[0][0])
+            if pages_raw
+            else None
+        )
 
         for page_index, items in enumerate(pages_raw, start=1):
             width, _ = page_sizes[page_index - 1]
@@ -356,7 +512,12 @@ def parse_pdf(path: Path, filename: str) -> dict[str, Any]:
                     )
                     continue
 
-                if not seen_title and page_index == 1 and item["size"] >= body_size * 1.28:
+                if (
+                    not seen_title
+                    and page_index == 1
+                    and title_bbox is not None
+                    and tuple(float(v) for v in item["bbox"]) == title_bbox
+                ):
                     blocks.append(
                         {
                             **item_layout,
@@ -420,6 +581,7 @@ def parse_pdf(path: Path, filename: str) -> dict[str, Any]:
         ]
         _merge_title_lines(blocks, body_size)
         _merge_heading_continuations(blocks)
+        _prune_heading_noise(blocks, [height for _, height in page_sizes])
         common.attach_segments(blocks)
         toc = common.build_toc(blocks)
 
@@ -448,7 +610,7 @@ def parse_pdf(path: Path, filename: str) -> dict[str, Any]:
                 "body_size": body_size,
                 "pages": len(pages_raw),
                 "format": "pdf",
-                "parser_version": 3,
+                "parser_version": 5,
                 "pages_meta": pages_meta,
             },
         }

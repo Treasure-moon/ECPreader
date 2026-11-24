@@ -17,7 +17,7 @@ if errorlevel 1 (
 )
 
 echo 正在打包，大约需要 1-3 分钟...
-".venv\Scripts\python.exe" -m PyInstaller --noconfirm --clean --onefile --noconsole --name ECPReader --icon "web\assets\img\logo.ico" --version-file "tools\ecp_version.txt" --add-data "web;web" --collect-all webview --collect-data pymupdf --collect-submodules pythonnet --exclude-module onnxruntime --exclude-module PIL --hidden-import clr --hidden-import webview.platforms.winforms --hidden-import uvicorn.logging --hidden-import uvicorn.loops.auto --hidden-import uvicorn.protocols.http.auto --hidden-import uvicorn.protocols.websockets.auto --hidden-import uvicorn.lifespan.on run.py
+".venv\Scripts\python.exe" -m PyInstaller --noconfirm --clean --onefile --noconsole --name ECPReader --icon "web\assets\img\logo.ico" --version-file "tools\ecp_version.txt" --add-data "web;web" --add-data "README.md;." --add-data "RELEASES.md;." --collect-all webview --collect-data pymupdf --collect-submodules pythonnet --exclude-module onnxruntime --exclude-module PIL --hidden-import clr --hidden-import webview.platforms.winforms --hidden-import uvicorn.logging --hidden-import uvicorn.loops.auto --hidden-import uvicorn.protocols.http.auto --hidden-import uvicorn.protocols.websockets.auto --hidden-import uvicorn.lifespan.on run.py
 if errorlevel 1 (
     echo.
     echo [失败] 打包出错，请把上面的报错发给我。

@@ -7,6 +7,9 @@ from pathlib import Path
 
 from playwright.async_api import async_playwright
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from app import config  # noqa: E402
+
 BASE = "http://127.0.0.1:8791/"
 SHOTS = Path(__file__).parent / "shots"
 SHOTS.mkdir(exist_ok=True)
@@ -53,7 +56,9 @@ SELECT_CHINESE = """() => {
 }"""
 
 SELECT_SENTENCE = """() => {
-  const segs = [...document.querySelectorAll('.brow .pane.src .seg')].filter((s) => s.textContent.trim().length > 20);
+  // 页眉块在逐句视图里是隐藏的，选它会导致选区与复制结果不一致。
+  const segs = [...document.querySelectorAll('.brow:not(.type-header) .pane.src .seg')]
+    .filter((s) => s.textContent.trim().length > 20 && s.offsetParent !== null);
   if (!segs.length) return null;
   const seg = segs[0];
   const range = document.createRange();
@@ -97,7 +102,7 @@ async def main() -> int:
         await page.wait_for_timeout(200)
         about_text = await page.locator("#aboutModal").inner_text()
         check("关于界面可打开", await page.locator("#aboutModal").is_visible())
-        check("关于界面显示版本", "1.5.0" in about_text, about_text[:40].replace("\n", " / "))
+        check("关于界面显示版本", config.APP_VERSION in about_text, about_text[:40].replace("\n", " / "))
         check("关于界面显示作者与邮箱", "Treasure_moon" in about_text and "treasure_moon@163.com" in about_text)
         check("关于界面显示 GitHub 与 Star 引导", "github.com/Treasure-moon/ECPreader" in about_text and "Star" in about_text)
         await page.locator('#aboutModal [data-close="about"]').last.click()
@@ -300,7 +305,7 @@ async def main() -> int:
 
         # 切换逐句对照
         await page.locator('#viewSwitch [data-view="flow"]').click()
-        await page.wait_for_selector(".brow", timeout=15000)
+        await page.wait_for_selector(".brow:not(.type-header)", timeout=15000)
         brows = await page.locator(".brow").count()
         check("逐句对照仍有内容", brows > 10, f"{brows} 段")
         check("逐句模式显示栏目头", await page.locator("#colhead").is_visible())

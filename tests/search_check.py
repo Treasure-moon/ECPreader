@@ -73,17 +73,11 @@ async def main() -> int:
         check("跨页命中可跳转", "无结果" not in jump_count and jump_scroll > 100,
               f"{jump_count} · scrollTop={round(jump_scroll)}")
 
-        # 原版视图：查找中文译文
-        await page.locator("#searchInput").fill("点集")
-        await page.wait_for_timeout(700)
-        zh_count = (await page.locator("#searchCount").inner_text()).strip()
-        zh_ranges = await highlight_texts("ecp-search")
-        zh_current = await highlight_texts("ecp-search-current")
-        check("译文查找有命中", bool(zh_ranges), f"{zh_count} · {len(zh_ranges)} 处")
-        check("译文只高亮匹配的文字", bool(zh_ranges) and all(x == "点集" for x in zh_ranges),
-              "、".join(zh_ranges[:5]))
-        check("译文当前命中只高亮匹配文字", bool(zh_current) and all(x == "点集" for x in zh_current))
-        check("译文查找标明译文", "译文" in zh_count, zh_count)
+        # 原版视图：查找中文译文（用当前文档里真实出现多次的词，不写死）
+        zh_count = ""
+        zh_ranges: list[str] = []
+        zh_current: list[str] = []
+        term = ""
 
         await page.keyboard.press("Escape")
         check("Esc 关闭查找栏", not await page.locator("#searchBar").is_visible())
@@ -100,21 +94,52 @@ async def main() -> int:
         # 逐句视图：查找、当前项与跳转
         await page.locator('#viewSwitch [data-view="flow"]').click()
         await page.wait_for_timeout(500)
+        # 从当前文档的译文里挑一个出现最多的两字词，避免绑死某篇论文的用词。
+        term = await page.evaluate(
+            """() => {
+                const tgt = [...document.querySelectorAll('.brow .pane.tgt')]
+                    .map((node) => node.innerText).join('\\n');
+                const counts = new Map();
+                for (const match of tgt.matchAll(/[\\u4e00-\\u9fff]{2}/g)) {
+                    counts.set(match[0], (counts.get(match[0]) || 0) + 1);
+                }
+                const best = [...counts.entries()].filter(([, n]) => n >= 3)
+                    .sort((a, b) => b[1] - a[1]);
+                return best.length ? best[0][0] : '';
+            }"""
+        )
+        check("能找到可跳转的译文用词", bool(term), term)
         await page.keyboard.press("Control+f")
-        await page.locator("#searchInput").fill("点集")
+        await page.locator("#searchInput").fill(term)
         await page.wait_for_timeout(600)
         flow_count = (await page.locator("#searchCount").inner_text()).strip()
         flow_ranges = await highlight_texts("ecp-search")
         flow_current = await highlight_texts("ecp-search-current")
         check("逐句视图查找命中", bool(flow_ranges), f"{flow_count} · {len(flow_ranges)} 处")
-        check("逐句视图只高亮匹配文字", bool(flow_ranges) and all(x == "点集" for x in flow_ranges),
+        check("逐句视图只高亮匹配文字", bool(flow_ranges) and all(x == term for x in flow_ranges),
               "、".join(flow_ranges[:5]))
-        check("逐句视图当前项只高亮匹配文字", bool(flow_current) and all(x == "点集" for x in flow_current))
+        check("逐句视图当前项只高亮匹配文字", bool(flow_current) and all(x == term for x in flow_current))
         before = flow_count
         await page.locator("#searchInput").press("Enter")
         await page.wait_for_timeout(300)
         after = (await page.locator("#searchCount").inner_text()).strip()
         check("逐句视图可跳下一句", before != after, f"{before} → {after}")
+        await page.keyboard.press("Escape")
+
+        # 回到原版视图：中文译文的查找与高亮
+        await page.locator('#viewSwitch [data-view="layout"]').click()
+        await page.wait_for_timeout(600)
+        await page.keyboard.press("Control+f")
+        await page.locator("#searchInput").fill(term)
+        await page.wait_for_timeout(700)
+        zh_count = (await page.locator("#searchCount").inner_text()).strip()
+        zh_ranges = await highlight_texts("ecp-search")
+        zh_current = await highlight_texts("ecp-search-current")
+        check("译文查找有命中", bool(zh_ranges), f"{zh_count} · {len(zh_ranges)} 处")
+        check("译文只高亮匹配的文字", bool(zh_ranges) and all(x == term for x in zh_ranges),
+              "、".join(zh_ranges[:5]))
+        check("译文当前命中只高亮匹配文字", bool(zh_current) and all(x == term for x in zh_current))
+        check("译文查找标明译文", "译文" in zh_count, zh_count)
         await page.keyboard.press("Escape")
 
         check("无 JS 运行时错误", not errors, "; ".join(errors[:3])[:200])

@@ -14,7 +14,7 @@ from .errors import TranslationError, error_payload
 from .free import FreeTranslator, needs_translation
 from .mathmask import mask_math, restore_math
 
-SKIP_TYPES = {"formula"}
+SKIP_TYPES = {"formula", "header"}
 
 # 这些错误继续请求也没有意义：额度/凭据/配置问题必须立刻停下并提示用户。
 FATAL_CODES = {
@@ -650,7 +650,10 @@ async def retranslate_block(doc_id: str, seq: int, mode: str | None = None) -> d
     if block is None:
         raise TranslationError("parse_error", message="段落不存在")
     if block.get("type") in SKIP_TYPES:
-        raise TranslationError("empty_result", message="公式保持原样，不参与翻译")
+        raise TranslationError(
+            "empty_result",
+            message="页眉不参与翻译" if block.get("type") == "header" else "公式保持原样，不参与翻译",
+        )
     segments = block_segments(block)
     if not segments:
         raise TranslationError("empty_result", message="该段没有可翻译的文字")

@@ -5,6 +5,7 @@ import * as dict from './dict.js';
 import { initSettings, openSettings } from './settings.js';
 import { initHistory, openHistory } from './history.js';
 import * as search from './search.js';
+import * as chat from './chat.js';
 import {
   toast,
   toastError,
@@ -95,6 +96,8 @@ async function refreshSettings() {
   $('engineSelect').value = data.settings.engine_mode || 'free';
   applyTheme(data.settings.theme || 'light');
   setFontSize(Number(data.settings.font_size) || 16, false);
+  chat.setStatus(data.chat || { enabled: false });
+  chat.setUpdates(data.updates || null);
   return data;
 }
 
@@ -170,6 +173,7 @@ function presentTab(tab) {
   closeMoreMenu();
   closeDocMenu();
   closeExportMenu();
+  chat.syncDocument(tab.doc);
   if (tab.doc) {
     showReader();
     renderCurrent({ scrollTop: tab.scrollTop });
@@ -325,7 +329,8 @@ function callbacks() {
 
 async function ensureLayoutReady(document) {
   if (!document || document.filetype !== 'pdf') return document;
-  const outdated = Number(document.meta?.parser_version || 0) < 3;
+  // parser_version 5：目录会过滤掉页眉/图注/公式残片，页眉不再当标题。
+  const outdated = Number(document.meta?.parser_version || 0) < 5;
   if (supportsLayout(document) && !outdated) return document;
   if (state.reparsed.has(document.id)) return document;
   state.reparsed.add(document.id);
@@ -376,6 +381,7 @@ async function openDocument(document, { newTab = false } = {}) {
   renderTabs();
   showReader();
   renderCurrent();
+  chat.syncDocument(document);
   updateBlockTools();
   renderRecent();
 }
@@ -1234,6 +1240,7 @@ async function init() {
   });
   initSettings({ onSettingsChanged: () => refreshSettings().catch(() => {}) });
   initHistory({ onOpen: (docId) => openDocumentById(docId) });
+  chat.initChat();
   createTab();
   try {
     await refreshSettings();

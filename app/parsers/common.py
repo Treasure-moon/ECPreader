@@ -466,4 +466,140 @@ def build_toc(blocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
                     "type": block["type"],
                 }
             )
-    return toc
+    return filter_toc(toc)
+
+
+# --------------------------------------------------------------- 目录清洗
+# PDF 里不少“看起来像标题”的东西会被顺带识别成章节：页眉（每页重复的
+# 期刊名、页码 + 刊名）、图注、图片里的坐标轴标签、公式残片、作者行。
+# 这些条目在目录里毫无用处，而且会打断章节跳转，所以统一在生成/读取时过滤。
+
+# 图注、表注（含中文「图 / 表」以及 (a)(b) 这样的子图标签）。
+TOC_CAPTION_RE = re.compile(
+    r"^\s*(?:(?:fig(?:ure)?s?|tab(?:le)?s?|scheme|algorithm|listing|chart)\.?\s*"
+    r"(?:[0-9]+[a-zA-Z]?|[IVXivx]+)"
+    r"|图\s*[0-9]|表\s*[0-9]|式\s*[0-9]"
+    r"|\([a-z]\)|（[a-z]）)",
+    re.IGNORECASE,
+)
+
+TOC_MATH_CHARS = set(
+    "=<>≤≥±×÷∑∫∂√∞≈≠≡∈∉∪∩⊂⊃∝⊥∠°µΩ"
+    "αβγδεζηθικλμνξπρστυφχψωΓΔΘΛΞΠΣΦΨΩ"
+)
+
+
+def normalize_toc_key(text: str) -> str:
+    """把随页面变化的数字抹掉，用来识别「每页都重复的那几行」。
+
+    页眉通常带着页码或卷期号（1240 / VOL. 29 / 2025），逐页不同，
+    但把数字归一后就是同一串文字。
+    """
+    lowered = (text or "").lower()
+    lowered = re.sub(r"\d+", "#", lowered)
+    lowered = re.sub(r"[^0-9a-z#\u4e00-\u9fff]+", " ", lowered)
+    return re.sub(r"\s+", " ", lowered).strip(" #")
+
+
+def loose_toc_key(text: str) -> str:
+    """比 normalize_toc_key 更宽：连数字本身也去掉。
+
+    有的期刊把页码放在行首、有的放在行尾（“1240 IEEE TRANSACTIONS …” 对
+    “IEEE TRANSACTIONS … 1239”），只把数字换成 # 仍会得到不同的串，
+    去掉数字后才能认出是同一行页眉。
+    """
+    key = re.sub(r"#+", " ", normalize_toc_key(text))
+    return re.sub(r"\s+", " ", key).strip()
+
+
+def _toc_words(text: str) -> list[str]:
+    return re.findall(r"[A-Za-z]{2,}", text)
+
+
+BARE_NUMBER_RE = re.compile(r"^\s*(\d{1,2}(?:\.\d{1,2}){0,3})\s+(\S.*)$")
+
+
+def looks_like_tick_label(text: str) -> bool:
+    """“14 MODELS”“1 N” 这类图片刻度/图例：编号后面没有点，只跟一个词。
+
+    真章节标题几乎都带点（``A. Framework`` / ``1. Introduction``）或者跟了
+    一整串词，所以这个判据只针对「裸数字 + 单个词」。
+    """
+    match = BARE_NUMBER_RE.match(text or "")
+    if not match:
+        return False
+    rest = match.group(2).strip()
+    if len(re.findall(r"[A-Za-z]{2,}", rest)) >= 2:
+        return False
+    return rest.lower().rstrip(".:") not in SECTION_NAMES
+
+
+def toc_entry_ok(text: str, *, level: int = 1) -> bool:
+    """判断一条目录项是不是真正的章节标题。"""
+    stripped = (text or "").strip()
+    # 中文标题可以很短（引言 / 方法 / 结论），英文标题至少 3 个字符。
+    has_cjk = bool(re.search(r"[\u4e00-\u9fff]", stripped))
+    if len(stripped) < (2 if has_cjk else 3) or len(stripped) > 160:
+        return False
+    if TOC_CAPTION_RE.match(stripped):
+        return False
+    # 公式残片：等号、集合符号、希腊字母、上下标符号。
+    if any(ch in TOC_MATH_CHARS for ch in stripped):
+        return False
+    # 作者行：一堆逗号分隔的姓名 + 单位角标。
+    if stripped.count(",") >= 4:
+        return False
+    if re.search(r"[\[\]{}^_|]", stripped):
+        return False
+    words = _toc_words(stripped)
+    if not words:
+        return bool(re.search(r"[\u4e00-\u9fff]", stripped))
+    # 整句（标题不会以句号结尾还带一长串词）。
+    if stripped.endswith(".") and len(words) > 6:
+        return False
+    if looks_like_tick_label(stripped):
+        return False
+    if _heading_marker_level(stripped):
+        return True
+    if len(words) < 2:
+        # 没有编号的单字标题：只认常见章节名（REFERENCES 之类）。
+        return stripped.lower().rstrip(".:") in SECTION_NAMES
+    return True
+
+
+def filter_toc(toc: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    """过滤目录里的页眉、图注、公式残片、作者行与重复条目。"""
+    entries = [entry for entry in (toc or []) if isinstance(entry, dict)]
+    if not entries:
+        return []
+    # 1) 论文标题之前的条目（期刊名、卷期、DOI 行）不是章节。
+    title_index = next(
+        (index for index, entry in enumerate(entries) if entry.get("type") == "title"),
+        None,
+    )
+    start = 0 if title_index is None else title_index
+    # 2) 出现在 3 个以上不同页面 = 页眉（页码/卷期逐页不同，去掉数字后应一致）。
+    pages_by_key: dict[str, set] = {}
+    for entry in entries:
+        key = loose_toc_key(entry.get("text") or "")
+        if len(key) >= 8:
+            pages_by_key.setdefault(key, set()).add(entry.get("page"))
+    running_headers = {key for key, pages in pages_by_key.items() if len(pages) >= 3}
+
+    output: list[dict[str, Any]] = []
+    seen_seq: set = set()
+    for index, entry in enumerate(entries):
+        text = (entry.get("text") or "").strip()
+        if entry.get("type") == "header":
+            continue
+        if index < start and entry.get("type") != "title":
+            continue
+        if loose_toc_key(text) in running_headers:
+            continue
+        if entry.get("seq") in seen_seq:
+            continue
+        if not toc_entry_ok(text, level=entry.get("level") or 1):
+            continue
+        seen_seq.add(entry.get("seq"))
+        output.append(entry)
+    return output

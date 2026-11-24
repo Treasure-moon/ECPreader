@@ -8,7 +8,7 @@ import tempfile
 from pathlib import Path
 
 APP_NAME = "ECPreader"
-APP_VERSION = "1.5.0"
+APP_VERSION = "1.6.0"
 
 if getattr(sys, "frozen", False):
     BASE_DIR = Path(sys.executable).resolve().parent
@@ -108,6 +108,9 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "theme": "light",
     "glossary": "",                 # 自定义术语表，每行 "english=中文"
     "show_page_badges": True,
+    "update_check": True,           # 阅读助手是否去仓库问一次最新版本（可关）
+    "chat_budget": 24000,           # 阅读助手的论文上下文上限（字符）
+    "chat_full_on_summary": False,  # 总结/通读全文时是否发送整篇（默认关，省额度）
     "free_cached_provider": "",     # 内部：上次探测成功的免费服务
 }
 

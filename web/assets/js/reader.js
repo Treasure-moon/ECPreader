@@ -173,6 +173,7 @@ function renderRow(block) {
   const row = document.createElement('article');
   row.className = `brow type-${block.type} lvl-${block.level || 0}`;
   row.dataset.seq = block.seq;
+  row.dataset.page = block.page || 0;
   row.id = `b${block.seq}`;
 
   const gutter = document.createElement('div');

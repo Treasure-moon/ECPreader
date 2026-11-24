@@ -192,19 +192,23 @@
           </label>
         </div>
 
-        <div class="field-grid" id="freeFields">
-          <label class="field">
-            <span>免费服务</span>
-            <select id="freeProvider"></select>
-          </label>
-          <label class="field">
-            <span>邮箱（可选，用于提高 MyMemory 免费额度）</span>
-            <input id="freeEmail" type="email" placeholder="you@example.com" autocomplete="off">
-          </label>
-          <p class="field-note span2" id="freeNote"></p>
+        <div id="freeFields" class="settings-group" hidden>
+          <h3 class="group-title">免密钥服务</h3>
+          <div class="field-grid">
+            <label class="field">
+              <span>免费服务</span>
+              <select id="freeProvider"></select>
+            </label>
+            <label class="field">
+              <span>邮箱（可选）</span>
+              <input id="freeEmail" type="email" placeholder="you@example.com" autocomplete="off">
+            </label>
+          </div>
+          <p class="field-note" id="freeNote"></p>
         </div>
 
-        <div id="aiFields">
+        <div id="aiFields" class="settings-group">
+          <h3 class="group-title">接口</h3>
           <div class="field-grid">
             <label class="field">
               <span>服务商</span>
@@ -215,7 +219,7 @@
               <input id="aiModel" placeholder="deepseek-chat" spellcheck="false">
             </label>
             <label class="field span2">
-              <span>接口地址（OpenAI 兼容接口或 Ollama 地址）</span>
+              <span>接口地址 <em class="field-aside">OpenAI 兼容接口或 Ollama 地址</em></span>
               <input id="aiBaseUrl" placeholder="https://api.deepseek.com/v1" spellcheck="false">
             </label>
             <label class="field span2">
@@ -227,7 +231,7 @@
               </div>
             </label>
             <label class="field">
-              <span>并发数</span>
+              <span>并发数 <em class="field-aside">同时翻译的段落数</em></span>
               <select id="aiConcurrency">
                 <option value="1">1 · 最稳</option>
                 <option value="2">2</option>
@@ -245,19 +249,52 @@
           <p class="preset-note" id="presetNote"></p>
         </div>
 
-        <label class="field span2">
-          <span>自定义术语表（每行「英文=中文」，全篇强制统一）</span>
-          <textarea id="glossary" rows="3" placeholder="large language model=大语言模型&#10;retrieval-augmented generation=检索增强生成"></textarea>
-        </label>
-
-        <div class="switch-row">
-          <label class="switch"><input type="checkbox" id="trRefs"><span>翻译参考文献</span></label>
-          <label class="switch"><input type="checkbox" id="trFormulas"><span>翻译公式（不推荐，公式通常保留原样）</span></label>
-        </div>
-
         <div class="test-row">
           <button class="btn primary" id="btnTest" type="button">测试连接</button>
           <span id="testResult" class="test-result"></span>
+        </div>
+
+        <div id="assistantFields" class="settings-group">
+          <h3 class="group-title">阅读助手 ✦</h3>
+          <label class="field">
+            <span>每次最多发送的字数 <em class="field-aside">论文越长，超出部分不发送</em></span>
+            <select id="chatBudget">
+              <option value="12000">1.2 万字符</option>
+              <option value="24000">2.4 万字符（默认）</option>
+              <option value="48000">4.8 万字符</option>
+              <option value="96000">9.6 万字符</option>
+              <option value="160000">16 万字符</option>
+            </select>
+            <small class="field-hint" id="chatBudgetHint"></small>
+          </label>
+          <label class="toggle-line">
+            <input type="checkbox" id="chatFullSummary">
+            <span class="toggle-text">
+              <strong>总结全文时发送整篇</strong>
+              <small>点「总结全文」或明确要求通读时，不受上面的字数限制；日常问答不受影响。</small>
+            </span>
+          </label>
+          <p class="field-note">
+            超出部分不发送，但会附上全文目录和你正在看的那一页。往上调，整篇总结更完整，token 与费用同比例增加；
+            用本地模型（Ollama）不产生费用，可以放心调大。
+          </p>
+        </div>
+
+        <div class="settings-group">
+          <h3 class="group-title">翻译范围</h3>
+          <div class="switch-row">
+            <label class="switch"><input type="checkbox" id="trRefs"><span>翻译参考文献</span></label>
+            <label class="switch"><input type="checkbox" id="trFormulas"><span>翻译公式（通常保留原样）</span></label>
+          </div>
+        </div>
+
+        <div class="settings-group">
+          <h3 class="group-title">术语表</h3>
+          <label class="field">
+            <span>自定义术语表</span>
+            <textarea id="glossary" rows="3" placeholder="large language model=大语言模型&#10;retrieval-augmented generation=检索增强生成"></textarea>
+            <small class="field-hint">每行一条「英文=中文」，全篇强制统一；留空则不使用。</small>
+          </label>
         </div>
       </section>
 
@@ -281,7 +318,12 @@
           <code id="dataDirPath" class="path-line">读取中…</code>
           <p class="field-note" id="dataDirHint">更改后会把现有数据一起迁移到新目录，重启软件生效。</p>
         </div>
+        <label class="switch" id="updateRow">
+          <input type="checkbox" id="updateCheck">
+          <span>版本更新提示：打开阅读助手时向项目仓库查询一次最新版本（只发一个 GET，不带任何本机信息）</span>
+        </label>
         <div class="data-actions">
+          <button class="btn" id="btnCheckUpdate">检查更新</button>
           <button class="btn" id="btnOpenDataDir">打开数据目录</button>
           <button class="btn" id="btnBackup">导出备份</button>
           <button class="btn danger-ghost" id="btnClearHistory">清空翻译历史</button>
@@ -290,7 +332,7 @@
         <p class="field-note">
           所有文档、译文、术语表与历史记录都保存在本机数据目录的 SQLite 数据库中；
           API Key 单独加密存放在 vault.bin，主密钥由 Windows DPAPI 绑定当前账户，换账户或换电脑都无法解密。
-          程序不包含任何埋点、遥测或云端同步。
+          程序不包含任何埋点、遥测或云端同步；唯一的联网查询是上面这个版本检查，可以随时关掉。
         </p>
         </section>
     </div>
@@ -319,7 +361,7 @@
     </header>
     <div class="dialog-body about-body">
       <p class="about-version">版本 <strong id="aboutVersion">__ECP_VERSION__</strong><span>本地运行 · 数据不出电脑 · 无遥测</span></p>
-      <p class="about-intro">把 PDF / Word 论文拖进窗口：左侧保留论文原貌，右侧在同一位置显示中文译文；也可以切换到逐句对照，选中句子两边同步高亮，双击单词查看词典释义和语境意译。</p>
+      <p class="about-intro">把 PDF / Word 论文拖进窗口：左侧保留论文原貌，右侧在同一位置显示中文译文；也可以切换到逐句对照，选中句子两边同步高亮，双击单词查看词典释义和语境意译。配置好自己的 AI 接口后，右下角的 ✦ 按钮会打开阅读助手，它读过当前这篇论文，可以帮你总结、拆解、答疑，也能回答 ECPreader 自身的使用问题。</p>
       <dl class="about-facts">
         <div><dt>作者</dt><dd>Treasure_moon</dd></div>
         <div><dt>邮箱</dt><dd><button class="link" data-external="mailto:treasure_moon@163.com">treasure_moon@163.com</button></dd></div>
@@ -366,6 +408,44 @@
     <button class="btn small ghost" id="btnLoadingCancel" hidden>取消</button>
   </div>
 </div>
+
+<button id="btnChat" class="chat-fab" type="button" title="AI 阅读助手（围绕当前论文）" aria-label="打开 AI 阅读助手" hidden>
+  <span class="chat-fab-icon" aria-hidden="true">✦</span>
+</button>
+
+<aside id="chatPanel" class="chat-panel" hidden aria-label="AI 阅读助手">
+  <header class="chat-head">
+    <div class="chat-head-main">
+      <span class="chat-mark" aria-hidden="true">✦</span>
+      <div>
+        <div class="chat-title">AI 阅读助手</div>
+        <div class="chat-sub" id="chatSub">基于你在设置里填的接口</div>
+      </div>
+    </div>
+    <div class="chat-head-actions">
+      <button class="btn icon tiny" id="btnChatClear" type="button" title="清空这次对话" aria-label="清空对话">↺</button>
+      <button class="btn icon tiny" id="btnChatClose" type="button" title="关闭（Esc）" aria-label="关闭 AI 助手">✕</button>
+    </div>
+  </header>
+  <div class="chat-log" id="chatLog" role="log" aria-live="polite">
+    <div class="chat-empty" id="chatEmpty">
+      <p class="chat-empty-title">这篇论文，哪里没读懂？</p>
+      <div class="chat-chips">
+        <button class="chat-chip" type="button" data-full="1" data-prompt="用一段话总结这篇论文：它解决什么问题，用了什么方法，结论是什么。">总结全文</button>
+        <button class="chat-chip" type="button" data-prompt="把这篇论文的方法部分拆解一下：核心思路、关键步骤、创新点和成立的前提假设。">拆解方法</button>
+        <button class="chat-chip" type="button" data-prompt="这篇论文的实验设计有什么局限？结论在什么条件下可能不成立？">找局限</button>
+        <button class="chat-chip" type="button" data-prompt="ECPreader 有哪些功能，怎么用？">软件怎么用</button>
+      </div>
+    </div>
+  </div>
+  <form class="chat-form" id="chatForm">
+    <textarea id="chatInput" rows="1" placeholder="总结、分析、名词解释…" spellcheck="false"></textarea>
+    <button class="btn small primary" id="chatSend" type="submit" aria-label="发送">发送</button>
+  </form>
+  <p class="chat-disclaimer">
+    AI 回答由你在设置里填写的第三方接口生成，费用、错误、产物及由此带来的隐私风险由你自行承担。ECPreader 只把问题与论文正文发给该接口；你在设置里填写的 API Key、邮箱等只保存在本机，不会出现在对话请求里。打开助手时会向项目仓库查一次最新版本号（可在设置里关闭）。
+  </p>
+</aside>
 
 <div id="toasts" class="toasts" aria-live="polite"></div>
 

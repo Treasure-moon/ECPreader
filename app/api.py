@@ -18,9 +18,10 @@ from urllib.parse import quote
 from fastapi import APIRouter, BackgroundTasks, Body, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 
-from . import config, db, exporting, security
+from . import chat, config, db, exporting, security, updates
 from .config import AI_PRESETS, FREE_PROVIDERS
 from .parsers import ParseError, parse_document
+from .parsers import common
 from .translate import dictionary, pipeline
 from .translate.errors import TranslationError
 
@@ -68,6 +69,9 @@ def _with_layout(document: dict | None) -> dict | None:
     meta = document.get("meta") or {}
     document["layout"] = "abs" if meta.get("layout") == "abs" and meta.get("pages_meta") else "flow"
     document["pages_meta"] = meta.get("pages_meta") or []
+    # 老文档的目录是在识别规则更松的版本里生成的，读取时再过滤一遍页眉/图注/公式，
+    # 这样不重新解析也能立刻变干净。
+    document["toc"] = common.filter_toc(document.get("toc") or [])
     return document
 
 
@@ -390,6 +394,61 @@ async def translate_block(doc_id: str, seq: int, payload: dict = Body(default={}
     return {"seq": seq, "translation": translation}
 
 
+# ------------------------------------------------------------- AI 阅读助手
+@router.get("/chat/status")
+def chat_status() -> dict:
+    settings = db.get_settings()
+    if chat.status(settings)["enabled"] and updates.enabled(settings):
+        updates.start_background()
+    return {"chat": chat.status(settings), "updates": updates.payload()}
+
+
+@router.get("/updates")
+def read_updates() -> dict:
+    """最新发布版本（缓存 6 小时）。查不到就是不知道，不影响其它功能。"""
+    settings = db.get_settings()
+    result = updates.payload()
+    result["enabled"] = updates.enabled(settings)
+    if result["enabled"]:
+        updates.start_background()
+    return result
+
+
+@router.post("/updates/check")
+def check_updates() -> dict:
+    """用户主动点「检查更新」：同步查一次，失败也返回可读的原因。"""
+    settings = db.get_settings()
+    if not updates.enabled(settings):
+        result = updates.payload()
+        result["enabled"] = False
+        return result
+    updates.refresh()
+    result = updates.payload()
+    result["enabled"] = True
+    return result
+
+
+@router.post("/documents/{doc_id}/chat")
+async def chat_with_document(
+    doc_id: str, payload: dict = Body(default={})
+) -> StreamingResponse:
+    """围绕当前论文和 AI 对话；逐段流式返回，SSE 格式。"""
+    document = db.get_document(doc_id)
+    if not document:
+        raise HTTPException(status_code=404, detail="文档不存在或已被删除")
+    return StreamingResponse(
+        chat.stream_events(
+            document, payload.get("messages"), payload.get("page"), payload.get("full")
+        ),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-store",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 # ------------------------------------------------------------------ exports
 @router.get("/documents/{doc_id}/export")
 def export_document(doc_id: str, format: str = "md") -> StreamingResponse:
@@ -432,6 +491,8 @@ def read_settings() -> dict:
             "data_dir_fallback": config.DATA_DIR_FALLBACK,
         },
         "engine": _engine_info(settings),
+        "chat": chat.status(settings),
+        "updates": {**updates.payload(), "enabled": updates.enabled(settings)},
     }
 
 
@@ -446,6 +507,9 @@ SETTING_VALIDATORS = {
     "translate_references": lambda v: isinstance(v, bool),
     "translate_formulas": lambda v: isinstance(v, bool),
     "show_page_badges": lambda v: isinstance(v, bool),
+    "update_check": lambda v: isinstance(v, bool),
+    "chat_budget": lambda v: isinstance(v, int) and 6000 <= v <= 160000,
+    "chat_full_on_summary": lambda v: isinstance(v, bool),
     "free_email": lambda v: isinstance(v, str) and len(v) <= 200,
     "glossary": lambda v: isinstance(v, str) and len(v) <= 8000,
     "ai_base_url": lambda v: isinstance(v, str) and len(v) <= 500,

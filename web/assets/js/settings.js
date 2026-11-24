@@ -43,6 +43,7 @@ export function initSettings({ onSettingsChanged }) {
   $('btnSaveKey').addEventListener('click', saveKey);
   $('btnClearKey').addEventListener('click', clearKey);
   $('btnTest').addEventListener('click', testConnection);
+  $('chatBudget').addEventListener('change', updateBudgetHint);
   $('btnPickDataDir').addEventListener('click', pickDataDir);
   $('btnOpenDataDir').addEventListener('click', async () => {
     try {
@@ -52,6 +53,7 @@ export function initSettings({ onSettingsChanged }) {
     }
   });
   $('btnBackup').addEventListener('click', () => download(api.downloadUrl('/api/history/export')));
+  $('btnCheckUpdate').addEventListener('click', checkUpdates);
   $('btnClearHistory').addEventListener('click', async () => {
     if (!confirmAction('确定清空全部翻译历史吗？', '文档与译文不会被删除，只清除历史记录。')) return;
     try {
@@ -82,6 +84,7 @@ function toggleMode() {
   const mode = currentMode();
   $('aiFields').hidden = mode !== 'ai';
   $('freeFields').hidden = mode !== 'free';
+  $('assistantFields').hidden = mode !== 'ai';
 }
 
 function fillSelect(select, items) {
@@ -92,6 +95,22 @@ function fillSelect(select, items) {
     option.textContent = info.label || key;
     select.appendChild(option);
   }
+}
+
+const BUDGET_HINTS = {
+  12000: '约 2–3 页正文 · 最省额度',
+  24000: '约 4–6 页正文 · 日常问答够用',
+  48000: '约 8–12 页正文 · 多数论文能覆盖大半',
+  96000: '整篇 10–15 页论文 · 费用约为默认的 4 倍',
+  160000: '超长论文 · 费用约为默认的 6 倍以上，部分接口会拒收',
+};
+
+function updateBudgetHint() {
+  const node = $('chatBudgetHint');
+  if (!node) return;
+  const value = Number($('chatBudget').value) || 24000;
+  const known = BUDGET_HINTS[value];
+  node.textContent = known || `每次最多约 ${(value / 10000).toFixed(1)} 万字符 · 费用约为默认的 ${(value / 24000).toFixed(1)} 倍`;
 }
 
 function fill(data) {
@@ -116,6 +135,10 @@ function fill(data) {
   $('aiTempOut').textContent = Number(settings.ai_temperature ?? 0.2).toFixed(2);
   $('glossary').value = settings.glossary || '';
   $('trRefs').checked = Boolean(settings.translate_references);
+  $('updateCheck').checked = settings.update_check !== false;
+  $('chatBudget').value = String(settings.chat_budget || 24000);
+  updateBudgetHint();
+  $('chatFullSummary').checked = Boolean(settings.chat_full_on_summary);
   $('trFormulas').checked = Boolean(settings.translate_formulas);
   $('aiKey').value = '';
   $('testResult').textContent = '';
@@ -202,6 +225,9 @@ function collect() {
     ai_temperature: Number($('aiTemp').value),
     glossary: $('glossary').value,
     translate_references: $('trRefs').checked,
+    update_check: $('updateCheck').checked,
+    chat_budget: Number($('chatBudget').value) || 24000,
+    chat_full_on_summary: $('chatFullSummary').checked,
     translate_formulas: $('trFormulas').checked,
   };
 }
@@ -298,6 +324,32 @@ async function clearKey() {
     onChanged();
   } catch (err) {
     toastError(err);
+  }
+}
+
+async function checkUpdates() {
+  const hint = $('settingsHint');
+  const button = $('btnCheckUpdate');
+  button.disabled = true;
+  hint.textContent = '正在向项目仓库查询最新版本…';
+  try {
+    const info = await api.post('/api/updates/check');
+    if (info.enabled === false) {
+      hint.textContent = '「版本更新提示」已关闭，助手不会联网查版本。';
+    } else if (info.error) {
+      hint.textContent = '查不到最新版本（可能是网络或代理问题），稍后再试。';
+    } else if (info.newer) {
+      hint.textContent = `发现新版本 ${info.latest}，你现在是 ${info.current}，建议更新。`;
+    } else if (info.latest) {
+      hint.textContent = `已是最新版本（${info.current}）。`;
+    } else {
+      hint.textContent = '暂时查不到最新版本，稍后再试。';
+    }
+  } catch (err) {
+    hint.textContent = '检查更新失败，稍后再试。';
+    toastError(err);
+  } finally {
+    button.disabled = false;
   }
 }
 
