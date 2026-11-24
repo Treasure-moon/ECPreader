@@ -82,10 +82,16 @@ def _version_lines() -> str:
     dev = any(version == current and is_dev for version, is_dev in versions)
     published = next((version for version, is_dev in versions if not is_dev), "")
     lines = [f"当前运行版本：ECPreader {current}" + ("（开发版／源码版，功能已经可用）。" if dev else "。")]
-    if dev and published:
-        lines.append(
-            f"本地资料里记录的最近发布安装包是 {published}：{current} 的新功能在 {published} 安装包中还没有。"
-        )
+    if published:
+        if dev:
+            lines.append(
+                f"本地资料里记录的最近发布安装包是 {published}：{current} 的新功能在 {published} 安装包中还没有。"
+            )
+        else:
+            lines.append(
+                f"本地资料里记录的最近发布安装包是 {published}；"
+                f"如果资料还附了「联网查到的最新发布」，以那一条为准。"
+            )
     lines.append(
         "打包进程序的这份资料本身不会更新；如果资料最后还附了「联网查到的最新发布」，"
         "就以那一条为准回答是否最新；没有附上时让用户到 "

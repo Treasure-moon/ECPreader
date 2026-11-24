@@ -27,7 +27,12 @@ SOURCE = os.environ.get(
     "ECP_RELEASES_API",
     "https://api.github.com/repos/Treasure-moon/ECPreader/releases/latest",
 )
-RELEASES_PAGE = "https://github.com/Treasure-moon/ECPreader/releases/latest"
+# 网页版的 latest 会 302 到具体 tag（/releases/tag/v1.6.0），拿它做备用来源：
+# GitHub 的匿名 API 每个 IP 每小时只有 60 次，共用出口（校园网、公司网、代理）很容易被限流。
+RELEASES_PAGE = os.environ.get(
+    "ECP_RELEASES_PAGE",
+    "https://github.com/Treasure-moon/ECPreader/releases/latest",
+)
 TTL = 6 * 3600
 TIMEOUT = httpx.Timeout(6.0, connect=4.0, read=6.0)
 NOTES_CHARS = 1200
@@ -71,15 +76,19 @@ def newer_than(current: str, latest: str) -> bool:
         return False
 
 
-def _fetch() -> dict[str, Any]:
+def _headers() -> dict[str, str]:
+    return {
+        "User-Agent": f"ECPreader/{config.APP_VERSION} (+https://github.com/Treasure-moon/ECPreader)",
+        "Accept": "application/vnd.github+json",
+    }
+
+
+def _fetch_api() -> dict[str, Any]:
     response = httpx.get(
         SOURCE,
         timeout=TIMEOUT,
         follow_redirects=True,
-        headers={
-            "User-Agent": f"ECPreader/{config.APP_VERSION} (+https://github.com/Treasure-moon/ECPreader)",
-            "Accept": "application/vnd.github+json",
-        },
+        headers=_headers(),
     )
     response.raise_for_status()
     data = response.json()
@@ -93,6 +102,31 @@ def _fetch() -> dict[str, Any]:
         "notes": body,
         "url": RELEASES_PAGE,
     }
+
+
+def _fetch_page() -> dict[str, Any]:
+    """接口被限流时的备用来源：只读 latest 页面的跳转地址，不需要令牌、不占额度。"""
+    response = httpx.get(
+        RELEASES_PAGE,
+        timeout=TIMEOUT,
+        follow_redirects=False,
+        headers={"User-Agent": _headers()["User-Agent"]},
+    )
+    location = response.headers.get("location") or ""
+    marker = "/releases/tag/"
+    if marker not in location:
+        raise ValueError("latest 页面没有跳转到具体版本")
+    tag = location.split(marker, 1)[1].strip("/").split("/")[0].lstrip("vV")
+    if not tag:
+        raise ValueError("跳转地址里没有版本号")
+    return {"latest": tag, "name": "", "published": "", "notes": "", "url": RELEASES_PAGE}
+
+
+def _fetch() -> dict[str, Any]:
+    try:
+        return _fetch_api()
+    except (httpx.HTTPError, ValueError, json.JSONDecodeError):
+        return _fetch_page()
 
 
 def refresh() -> dict[str, Any]:
@@ -145,7 +179,12 @@ def payload() -> dict[str, Any]:
 
 
 def relation(current: str, latest: str) -> str:
-    """current 相对 latest：newer（有新版）/ same / source（自己这版比发布版还新）/ unknown。"""
+    """current 相对 latest：newer（有新版）/ same / source（自己这版比发布版还新）/ unknown。
+
+    查不到（断网、限流、还没发布过）时必须是 unknown——不能把「不知道」说成「你比发布版还新」。
+    """
+    if not str(latest or "").strip():
+        return "unknown"
     try:
         mine, theirs = _parse(current), _parse(latest)
     except (TypeError, ValueError):

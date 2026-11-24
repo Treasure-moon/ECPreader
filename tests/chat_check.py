@@ -37,6 +37,20 @@ class MockReleases(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802
         RELEASE_HITS.append(self.path)
+        if self.path.startswith("/ratelimit"):
+            payload = b'{"message":"API rate limit exceeded"}'
+            self.send_response(403)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+            return
+        if self.path.startswith("/page"):
+            self.send_response(302)
+            self.send_header("Location", "https://github.com/Treasure-moon/ECPreader/releases/tag/v1.6.9")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
         body = json.dumps({
             "tag_name": LATEST_TAG,
             "name": "ECPreader 1.6.1",
@@ -264,6 +278,25 @@ def main() -> int:
         check("请求到了假仓库", len(RELEASE_HITS) >= 1, str(len(RELEASE_HITS)))
         live = httpx.get(f"{base}/api/updates", headers=headers, timeout=30).json()
         check("状态接口默认开启检查", live.get("enabled") is True, json.dumps(live, ensure_ascii=False)[:200])
+
+        print("查不到版本时的措辞")
+        from app import updates as updates_mod
+        check("没有最新版时判为未知", updates_mod.relation("1.6.0", "") == "unknown")
+        check("未知时不猜有新版", updates_mod.newer_than("1.6.0", "") is False)
+        updates_mod._STATE.update(latest="", name="", published="", notes="", error="")
+        check("没有数据时不给 AI 编资料", updates_mod.facts_block() == "")
+        old_api, old_page = updates_mod.SOURCE, updates_mod.RELEASES_PAGE
+        base_mock = old_api.rsplit("/releases/latest", 1)[0]
+        try:
+            updates_mod.SOURCE = base_mock + "/ratelimit"
+            updates_mod.RELEASES_PAGE = base_mock + "/page"
+            result = updates_mod.refresh()
+            check("接口限流时改读网页跳转", result["latest"] == "1.6.9", result["latest"])
+            check("限流也算查到了", result["error"] == "", result["error"])
+            check("网页来源判为有新版", result["relation"] == "newer", result["relation"])
+        finally:
+            updates_mod.SOURCE, updates_mod.RELEASES_PAGE = old_api, old_page
+            updates_mod.refresh()
 
         print("配置 AI 接口")
         httpx.put(
