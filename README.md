@@ -16,7 +16,7 @@
 
 | 文件 | 说明 |
 | --- | --- |
-| [ECPreader-Setup-1.6.0.exe](https://github.com/Treasure-moon/ECPreader/releases/latest/download/ECPreader-Setup-1.6.0.exe) | 安装版，推荐。可选安装路径、数据路径和快捷方式，可在「应用和功能」中卸载 |
+| [ECPreader-Setup-1.7.0.exe](https://github.com/Treasure-moon/ECPreader/releases/latest/download/ECPreader-Setup-1.7.0.exe) | 安装版，推荐。可选安装路径、数据路径和快捷方式，可在「应用和功能」中卸载 |
 | [ECPReader.exe](https://github.com/Treasure-moon/ECPreader/releases/latest/download/ECPReader.exe) | 免安装单文件版，双击运行 |
 
 Windows 10 / 11，不需要安装 Python。
@@ -81,7 +81,7 @@ build_exe.bat
 build_installer.bat
 ```
 
-生成 `installer\dist\ECPreader-Setup-1.6.0.exe`（安装包，内含卸载程序）。
+生成 `installer\dist\ECPreader-Setup-1.7.0.exe`（安装包，内含卸载程序）。
 
 发布新版本时：先把 `RELEASES.md` 里新版本标题上的「（开发版）」去掉，再改 `APP_VERSION`
 （`app/config.py`、`app/__init__.py`、`installer/setup_app.py`、`tools/ecp_version.txt`、`build_installer.bat`），

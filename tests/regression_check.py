@@ -114,6 +114,24 @@ def check_external_links() -> None:
     print("PASS external · 仅允许项目仓库、更新页与作者邮箱")
 
 
+def check_version_refs() -> None:
+    """版本号只有一个来源：README 的下载链接和构建说明都要跟 config.APP_VERSION 一致。"""
+    import re
+
+    from app.config import APP_VERSION
+
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    links = set(re.findall(r"ECPreader-Setup-([\d.]+)\.exe", readme))
+    assert links, "README 里找不到安装包链接"
+    assert links == {APP_VERSION}, f"README 里的安装包版本 {sorted(links)} != {APP_VERSION}"
+    for name in ("app/__init__.py", "tools/ecp_version.txt"):
+        text = (ROOT / name).read_text(encoding="utf-8")
+        assert APP_VERSION in text, f"{name} 里的版本号没跟上 {APP_VERSION}"
+    releases = (ROOT / "RELEASES.md").read_text(encoding="utf-8")
+    assert f"## {APP_VERSION}" in releases, f"RELEASES.md 里没有 {APP_VERSION} 这一节"
+    print(f"PASS version · README/RELEASES/版本文件都是 {APP_VERSION}")
+
+
 def check_startup_guard() -> None:
     import tempfile
 
@@ -199,6 +217,7 @@ def main() -> int:
     check_mathmask()
     check_db_alignment()
     check_external_links()
+    check_version_refs()
     check_startup_guard()
     check_history_dedupe()
     asyncio.run(check_free_retry())
