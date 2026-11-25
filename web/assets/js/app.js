@@ -4,6 +4,7 @@ import * as layout from './layout.js';
 import * as dict from './dict.js';
 import { initSettings, openSettings } from './settings.js';
 import { initHistory, openHistory } from './history.js';
+import { initVocab, openVocab } from './vocab.js';
 import * as search from './search.js';
 import * as chat from './chat.js';
 import {
@@ -83,9 +84,12 @@ const state = {
 function updateBadge(data) {
   const engine = data.engine || {};
   const badge = $('engineBadge');
-  badge.textContent = engine.detail ? `${engine.label} · ${engine.detail}` : engine.label || '未配置';
+  // 角标只留「AI」或「机翻」：细节放 tooltip，省出顶栏位置给生词本
+  badge.textContent = engine.mode === 'ai' ? 'AI' : engine.label ? '机翻' : '未配置';
+  badge.classList.toggle('is-ai', engine.mode === 'ai');
   badge.classList.toggle('is-warn', !engine.ready);
-  badge.title = engine.ready ? '翻译引擎已就绪，点击修改设置' : '引擎尚未就绪，点击配置';
+  const detail = [engine.label, engine.detail].filter(Boolean).join(' · ');
+  badge.title = engine.ready ? `翻译设置：${detail}（点击修改）` : `引擎尚未就绪（${detail || '未配置'}），点击配置`;
 }
 
 async function refreshSettings() {
@@ -314,16 +318,31 @@ function showHome() {
 function callbacks() {
   return {
     onTranslateBlock: (seq) => retranslateBlock(seq),
-    onWord: (info) => dict.showWordPopover(info),
+    onWord: (info) => dict.showWordPopover(withDocContext(info)),
     onWordHide: () => dict.hideWordPopover(),
     onCopied: () => toast({ title: '已复制本段中英对照', type: 'success', duration: 2500 }),
     onCopyFailed: () => toast({ title: '复制失败', message: '浏览器拒绝了剪贴板访问，请手动选择复制。', type: 'warn' }),
     onRetranslate: (seq) => retranslateBlock(seq),
     onUntranslated: (seq) => promptTranslateBlock(seq),
     onLookupStart: (rect) => dict.showLookupLoading(rect),
-    onLookupDone: (data, rect) => dict.showLookupData(data, rect),
+    onLookupDone: (data, rect) => dict.showLookupData(withDocContext(data), rect),
     onLookupError: (err, rect) => dict.showLookupError(err?.info || err, rect),
     onActiveBlock: (seq) => setActiveBlock(seq),
+  };
+}
+
+// 查词浮层要能收藏进生词本，所以把「来自哪篇论文、哪一页、哪一段」一起带上
+function withDocContext(info) {
+  if (!info) return info;
+  const doc = state.doc;
+  const seq = Number.isFinite(Number(info.seq)) ? Number(info.seq) : state.activeSeq;
+  const block = (doc?.blocks || []).find((item) => Number(item.seq) === Number(seq));
+  return {
+    ...info,
+    docId: info.docId || doc?.id || '',
+    docTitle: info.docTitle || doc?.title || '',
+    page: info.page ?? block?.page ?? null,
+    seq: info.seq ?? block?.seq ?? null,
   };
 }
 
@@ -1014,6 +1033,10 @@ function bind() {
     closeMoreMenu();
     openHistory();
   });
+  $('btnVocab').addEventListener('click', () => {
+    closeMoreMenu();
+    openVocab();
+  });
   $('btnHistoryHome').addEventListener('click', () => openHistory());
   $('btnTheme').addEventListener('click', () => {
     closeMoreMenu();
@@ -1240,6 +1263,7 @@ async function init() {
   });
   initSettings({ onSettingsChanged: () => refreshSettings().catch(() => {}) });
   initHistory({ onOpen: (docId) => openDocumentById(docId) });
+  initVocab({ onOpenDoc: (docId) => openDocumentById(docId) });
   chat.initChat();
   createTab();
   try {

@@ -1,5 +1,6 @@
 import { api } from './api.js';
-import { escapeHtml } from './ui.js';
+import { escapeHtml, toast, toastError } from './ui.js';
+import { refreshVocab } from './vocab.js';
 
 const popover = document.getElementById('wordPopover');
 let requestSeq = 0;
@@ -47,6 +48,111 @@ function errorHtml(err) {
   `;
 }
 
+function bookButtonHtml() {
+  return `
+    <button class="wp-book" type="button" data-state="empty" aria-label="收藏进生词本" title="收藏进生词本">
+      <svg class="bk-star" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 3.4l2.6 5.3 5.9.9-4.3 4.1 1 5.9-5.2-2.8-5.2 2.8 1-5.9L3.5 9.6l5.9-.9z"
+              fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+        <path d="M9.6 12.1h4.8M12 9.7v4.8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+      </svg>
+      <span class="bk-ring bk-num">✓</span>
+      <span class="bk-ring bk-plus">+1</span>
+    </button>`;
+}
+
+function senseOf(data) {
+  const list = Array.isArray(data.senses) ? data.senses : [];
+  return String(data.base_sense || list[0] || data.word_zh || data.word || '').trim();
+}
+
+function paintBook(button, info) {
+  if (!button) return;
+  const count = Number(info?.count) || 0;
+  const num = button.querySelector('.bk-num');
+  button.classList.remove('is-done', 'is-more', 'is-empty');
+  if (!count) {
+    button.dataset.state = 'empty';
+    button.classList.add('is-empty');
+    button.title = '收藏进生词本';
+    button.setAttribute('aria-label', '收藏进生词本');
+    return;
+  }
+  if (info.collected) {
+    button.dataset.state = 'done';
+    button.classList.add('is-done');
+    if (num) num.textContent = '✓';
+    const places = Number(info.matches?.length) || 1;
+    button.title = places > 1 ? `已收藏（${places} 处来源）· 点击取消收藏` : '已收藏 · 点击取消收藏';
+    button.setAttribute('aria-label', '已收藏，点击取消');
+    return;
+  }
+  button.dataset.state = 'more';
+  button.classList.add('is-more');
+  if (num) num.textContent = count > 9 ? '9+' : String(count);
+  button.title = `这个词已收藏 ${count} 个语义 · 点击把当前语义也收藏`;
+  button.setAttribute('aria-label', `已收藏 ${count} 个语义，点击收藏当前语义`);
+}
+
+async function toggleBook(button, data) {
+  if (!data?.word) return;
+  const sense = senseOf(data);
+  const gloss = String(data.context_meaning || '');
+  const state = button.dataset.state;
+  button.disabled = true;
+  try {
+    const info =
+      state === 'done'
+        ? await api.post('/api/vocab/uncollect', { word: data.word, sense, gloss })
+        : await api.post('/api/vocab', {
+            word: data.word,
+            display: data.word,
+            sense,
+            gloss,
+            pos: data.pos || '',
+            phonetic: data.phonetic || '',
+            senses: Array.isArray(data.senses) ? data.senses : [],
+            doc_id: data.docId || '',
+            doc_title: data.docTitle || '',
+            page: Number.isFinite(Number(data.page)) ? Number(data.page) : null,
+            seq: Number.isFinite(Number(data.seq)) ? Number(data.seq) : null,
+            sentence: data.sentence_en || '',
+            sentence_zh: data.sentence_zh || '',
+          });
+    paintBook(button, info);
+    const label = sense ? `「${data.word}」的「${sense}」` : `「${data.word}」`;
+    toast({
+      title: state === 'done' ? `已取消收藏${label}` : `已收藏${label}`,
+      message: state === 'done' ? '' : '在「⋮ → 生词本」里查看、分类或导出。',
+      type: 'success',
+      duration: state === 'done' ? 2500 : 4000,
+    });
+    refreshVocab().catch(() => {});
+  } catch (err) {
+    toastError(err);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function bindBook(data) {
+  const button = popover.querySelector('.wp-book');
+  if (!button) return;
+  button.addEventListener('click', (event) => {
+    event.stopPropagation();
+    toggleBook(button, data);
+  });
+  if (!data?.word) return;
+  api
+    .post('/api/vocab/status', {
+      word: data.word,
+      sense: senseOf(data),
+      gloss: String(data.context_meaning || ''),
+    })
+    .then((info) => paintBook(button, info))
+    .catch(() => {});
+}
+
 function render(data) {
   const defs = (data.definitions || [])
     .map((item) => `<li><span class="pos">${escapeHtml(item.pos || '')}</span>${escapeHtml(item.def)}</li>`)
@@ -92,6 +198,7 @@ function render(data) {
       <span class="wp-word">${escapeHtml(data.word)}</span>
       ${data.phonetic ? `<span class="wp-phonetic">${escapeHtml(data.phonetic)}</span>` : ''}
       ${data.pos ? `<span class="wp-pos">${escapeHtml(data.pos)}</span>` : ''}
+      ${bookButtonHtml()}
     </div>
     ${sections.join('')}
     <div class="wp-foot">
@@ -100,9 +207,10 @@ function render(data) {
     </div>
   `;
   popover.querySelector('[data-close]')?.addEventListener('click', hideWordPopover);
+  bindBook(data);
 }
 
-export function showWordPopover({ word, sentence, paragraph, rect }) {
+export function showWordPopover({ word, sentence, paragraph, rect, docId, docTitle, page, seq }) {
   // 设置/历史等浮层打开时不再弹出，避免遮挡与误触
   if (document.querySelector('.modal:not([hidden]), .drawer:not([hidden])')) {
     hideWordPopover();
@@ -111,19 +219,19 @@ export function showWordPopover({ word, sentence, paragraph, rect }) {
   const key = `${word}::${sentence}`;
   if (key === currentKey && !popover.hidden) return;
   currentKey = key;
-  const seq = ++requestSeq;
+  const seqNo = ++requestSeq;
   popover.hidden = false;
   popover.innerHTML = loadingHtml(word);
   positionNear(rect);
   api
     .post('/api/dict/lookup', { word, sentence, paragraph })
     .then((data) => {
-      if (seq !== requestSeq) return;
-      render(data);
+      if (seqNo !== requestSeq) return;
+      render({ ...data, docId, docTitle, page, seq });
       if (rect) positionNear(rect);
     })
     .catch((err) => {
-      if (seq !== requestSeq) return;
+      if (seqNo !== requestSeq) return;
       popover.innerHTML = errorHtml(err.info || err);
       popover.querySelector('[data-close]')?.addEventListener('click', hideWordPopover);
     });

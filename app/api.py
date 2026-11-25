@@ -18,7 +18,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, BackgroundTasks, Body, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 
-from . import chat, config, db, exporting, security, updates
+from . import chat, config, db, exporting, security, updates, vocab
 from .config import AI_PRESETS, FREE_PROVIDERS
 from .parsers import ParseError, parse_document
 from .parsers import common
@@ -316,6 +316,15 @@ async def word_at(doc_id: str, payload: dict = Body(default={})) -> dict:
         result = await dictionary.lookup(hit["word"], sentence, paragraph)
     except TranslationError as exc:
         raise _http_error(exc) from exc
+    # 收藏进生词本需要知道「来自哪篇论文、哪一页、哪一段」
+    result.update(
+        {
+            "page": page_no,
+            "seq": (block or {}).get("seq"),
+            "doc_id": doc_id,
+            "doc_title": str(meta.get("title") or ""),
+        }
+    )
     return result
 
 
@@ -866,3 +875,118 @@ async def dict_lookup(payload: dict = Body(default={})) -> dict:
         return await dictionary.lookup(word, sentence, paragraph)
     except TranslationError as exc:
         raise _http_error(exc) from exc
+
+# ------------------------------------------------------------------ 生词本
+@router.post("/vocab/status")
+def vocab_status(payload: dict = Body(default={})) -> dict:
+    return vocab.status(
+        str(payload.get("word") or ""),
+        str(payload.get("sense") or ""),
+        str(payload.get("gloss") or ""),
+    )
+
+
+@router.post("/vocab")
+def vocab_collect(payload: dict = Body(default={})) -> dict:
+    try:
+        return vocab.collect(
+            word=str(payload.get("word") or ""),
+            display=str(payload.get("display") or ""),
+            sense=str(payload.get("sense") or ""),
+            gloss=str(payload.get("gloss") or ""),
+            pos=str(payload.get("pos") or ""),
+            phonetic=str(payload.get("phonetic") or ""),
+            senses=[str(item) for item in (payload.get("senses") or []) if str(item).strip()],
+            doc_id=payload.get("doc_id") or None,
+            doc_title=str(payload.get("doc_title") or ""),
+            page=payload.get("page") if isinstance(payload.get("page"), int) else None,
+            seq=payload.get("seq") if isinstance(payload.get("seq"), int) else None,
+            sentence=str(payload.get("sentence") or ""),
+            sentence_zh=str(payload.get("sentence_zh") or ""),
+            category_id=payload.get("category_id") or None,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail={"message": str(exc)}) from exc
+
+
+@router.post("/vocab/uncollect")
+def vocab_uncollect(payload: dict = Body(default={})) -> dict:
+    removed = vocab.remove_sense(
+        str(payload.get("word") or ""),
+        str(payload.get("sense") or ""),
+        str(payload.get("gloss") or ""),
+    )
+    result = vocab.status(
+        str(payload.get("word") or ""),
+        str(payload.get("sense") or ""),
+        str(payload.get("gloss") or ""),
+    )
+    result["removed"] = removed
+    return result
+
+
+@router.get("/vocab/categories")
+def vocab_categories() -> dict:
+    return {"categories": vocab.list_categories()}
+
+
+@router.post("/vocab/categories")
+def vocab_create_category(payload: dict = Body(default={})) -> dict:
+    try:
+        return vocab.create_category(str(payload.get("name") or ""))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail={"message": str(exc)}) from exc
+
+
+@router.post("/vocab/categories/assign")
+def vocab_assign_category(payload: dict = Body(default={})) -> dict:
+    try:
+        updated = vocab.assign_category(
+            list(payload.get("entry_ids") or []), str(payload.get("category_id") or "")
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail={"message": str(exc)}) from exc
+    return {"ok": True, "updated": updated, **vocab.overview()}
+
+
+@router.patch("/vocab/categories/{category_id}")
+def vocab_rename_category(category_id: str, payload: dict = Body(default={})) -> dict:
+    ok = vocab.rename_category(category_id, str(payload.get("name") or ""))
+    return {"ok": ok, "categories": vocab.list_categories()}
+
+
+@router.delete("/vocab/categories/{category_id}")
+def vocab_delete_category(category_id: str) -> dict:
+    return {"ok": vocab.delete_category(category_id), "categories": vocab.list_categories()}
+
+
+@router.get("/vocab/export")
+def vocab_export(fmt: str = "csv") -> StreamingResponse:
+    if fmt == "md":
+        content = vocab.to_markdown().encode("utf-8")
+        media, extension = "text/markdown; charset=utf-8", ".md"
+    else:
+        content = vocab.to_csv()
+        media, extension = "text/csv; charset=utf-8", ".csv"
+    name = _safe_name(f"生词本-{db.now()[:10]}", extension)
+    headers = {
+        "Content-Disposition": f"attachment; filename*=UTF-8''{quote(name)}",
+        "Cache-Control": "no-store",
+    }
+    return StreamingResponse(io.BytesIO(content), media_type=media, headers=headers)
+
+
+@router.get("/vocab")
+def vocab_overview() -> dict:
+    return vocab.overview()
+
+
+@router.post("/vocab/{entry_id}/category")
+def vocab_entry_category(entry_id: str, payload: dict = Body(default={})) -> dict:
+    ok = vocab.set_category(entry_id, payload.get("category_id") or None)
+    return {"ok": ok, "entries": vocab.word_entries(str(payload.get("word") or ""))}
+
+
+@router.delete("/vocab/{entry_id}")
+def vocab_delete_entry(entry_id: str) -> dict:
+    return {"ok": vocab.delete_entry(entry_id)}

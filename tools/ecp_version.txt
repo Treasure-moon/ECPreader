@@ -14,11 +14,11 @@ VSVersionInfo(
       StringTable('080404B0', [
         StringStruct('CompanyName', 'ECPreader'),
         StringStruct('FileDescription', 'ECPreader 论文双语对照阅读器'),
-        StringStruct('FileVersion', '1.6.0'),
+        StringStruct('FileVersion', '1.7.0'),
         StringStruct('InternalName', 'ECPReader'),
         StringStruct('OriginalFilename', 'ECPReader.exe'),
         StringStruct('ProductName', 'ECPreader'),
-        StringStruct('ProductVersion', '1.6.0')
+        StringStruct('ProductVersion', '1.7.0')
       ])
     ]),
     VarFileInfo([VarStruct('Translation', [2052, 1200])])

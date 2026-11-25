@@ -8,7 +8,7 @@ import tempfile
 from pathlib import Path
 
 APP_NAME = "ECPreader"
-APP_VERSION = "1.6.0"
+APP_VERSION = "1.7.0"
 
 if getattr(sys, "frozen", False):
     BASE_DIR = Path(sys.executable).resolve().parent

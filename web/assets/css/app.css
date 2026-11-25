@@ -303,6 +303,11 @@ body:not(.reading) .toolbar { display: none; }
   background: var(--accent); margin-right: 7px; vertical-align: 1px;
 }
 .badge.is-warn::before { background: var(--warn); }
+.badge.is-ai::before { background: #6f5bd6; }
+/* 顶栏生词本：只放一个小书本图标，位置在「翻译设置」和「关于」之间 */
+.top-actions #btnVocab { display: inline-flex; align-items: center; justify-content: center; }
+.top-actions #btnVocab svg { display: block; }
+.top-actions #btnVocab:hover { color: var(--accent-ink); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
 
 /* --------------------------------------------------------- 首页 */
 #app { flex: 1 1 auto; min-height: 0; display: flex; }
@@ -1240,3 +1245,183 @@ body.focus-mode .chat-fab.active { opacity: 1; }
   .chat-panel { right: 8px; left: 8px; width: auto; bottom: 70px; height: min(70vh, 520px); }
   .chat-fab { right: 12px; bottom: 12px; }
 }
+
+/* --------------------------------------------------------- 生词本 */
+/* 查词浮层的收藏按钮：未收藏＝☆+，已收藏此义＝○✓，词已收藏但义不同＝○数字（悬停变 ○+1） */
+.wp-head { align-items: center; }
+.wp-book {
+  margin-left: auto; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 50%;
+  background: none; color: var(--muted); cursor: pointer; position: relative;
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: color .15s ease, background .15s ease;
+}
+.wp-book:hover { background: var(--accent-soft); color: var(--accent-ink); }
+.wp-book:disabled { opacity: .55; cursor: default; }
+.wp-book .bk-star { width: 19px; height: 19px; display: block; }
+.wp-book .bk-ring {
+  display: none; width: 21px; height: 21px; border: 1.5px solid currentColor; border-radius: 50%;
+  align-items: center; justify-content: center; font-size: 10.5px; font-weight: 700; line-height: 1;
+}
+.wp-book.is-done { color: var(--accent-ink); }
+.wp-book.is-more { color: var(--accent-ink); }
+.wp-book.is-done .bk-star, .wp-book.is-more .bk-star { display: none; }
+.wp-book.is-done .bk-num, .wp-book.is-more .bk-num { display: inline-flex; }
+.wp-book.is-more .bk-plus { display: none; }
+.wp-book.is-more:hover .bk-num { display: none; }
+.wp-book.is-more:hover .bk-plus { display: inline-flex; font-size: 9px; letter-spacing: -.02em; }
+
+.vocab-panel { width: min(580px, 96vw); }
+.drawer-count { font-size: 11.5px; font-weight: 400; color: var(--muted); letter-spacing: 0; }
+.vocab-toolbar {
+  display: flex; flex-direction: column; gap: 10px;
+  padding: 0 20px 12px; border-bottom: 1px solid var(--line);
+}
+.vocab-groups { display: flex; gap: 3px; padding: 3px; border-radius: 9px; background: var(--panel-2); }
+.vocab-groups button {
+  flex: 1; border: 0; background: none; border-radius: 7px; padding: 6px 4px;
+  font: inherit; font-size: 12px; color: var(--muted); cursor: pointer;
+}
+.vocab-groups button:hover { color: var(--ink-2); }
+.vocab-groups button.on { background: var(--panel); color: var(--ink); font-weight: 600; box-shadow: var(--shadow-sm); }
+.vocab-toolbar input, .vocab-cat-add input {
+  width: 100%; border: 1px solid var(--line-strong); border-radius: 8px;
+  padding: 7px 10px; font: inherit; font-size: 12.5px; background: var(--panel); color: var(--ink);
+}
+.vocab-toolbar input:focus, .vocab-cat-add input:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
+.vocab-list { flex: 1; overflow-y: auto; padding: 14px 20px 20px; }
+.vocab-empty { text-align: center; color: var(--muted); padding: 48px 12px; font-size: 13px; }
+.vocab-empty-mark { font-size: 28px; opacity: .45; margin-bottom: 10px; }
+.vocab-empty .hint { font-size: 12px; line-height: 1.85; max-width: 360px; margin: 8px auto 0; color: var(--muted); }
+.vocab-group + .vocab-group { margin-top: 18px; }
+.vocab-group-head { margin: 0 0 8px; font-size: 11px; font-weight: 600; letter-spacing: .08em; color: var(--muted); }
+.vocab-group-head .vg-count { margin-left: 6px; font-weight: 500; letter-spacing: 0; }
+/* 分类视图：整组是投放目标，拖过来的单词落到这一组 */
+.vocab-group { border-radius: 12px; }
+.vocab-group.is-over {
+  outline: 2px dashed color-mix(in srgb, var(--accent) 65%, transparent);
+  outline-offset: 3px;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+.vocab-group-empty {
+  padding: 10px 12px; border: 1px dashed var(--line-strong); border-radius: 10px;
+  font-size: 11.5px; color: var(--muted); text-align: center;
+}
+
+.vocab-word { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; background: var(--panel); }
+.vocab-word + .vocab-word { margin-top: 10px; }
+.vw-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
+.vw-word { font-family: var(--font-en); font-size: 17px; font-weight: 700; }
+.vw-phon { font-family: var(--font-en); font-size: 12px; color: var(--muted); }
+.vw-pos { font-size: 10.5px; color: var(--accent-ink); background: var(--accent-soft); border-radius: 5px; padding: 1px 6px; }
+.vw-count { margin-left: auto; font-size: 11px; color: var(--muted); }
+.vw-senses { display: flex; flex-direction: column; }
+.vsense { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; padding: 5px 0; font-size: 13px; }
+.vsense + .vsense { border-top: 1px dashed var(--line); }
+.vsense-term { font-weight: 650; color: var(--ink); }
+.vsense-kept .vsense-term { cursor: pointer; border-bottom: 1px solid var(--accent); }
+.vsense-kept .vsense-term:hover { color: var(--accent-ink); }
+.vsense-quiet .vsense-term { font-weight: 500; color: var(--muted); }
+.vsense-gloss { font-size: 12.5px; color: var(--ink-2); }
+.vsense-where {
+  font-size: 11px; color: var(--muted); max-width: 200px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.vsense-note { font-size: 11px; color: var(--muted); opacity: .8; }
+.vsense-tools { margin-left: auto; display: flex; align-items: center; gap: 4px; opacity: 0; transition: opacity .15s ease; }
+.vsense:hover .vsense-tools, .vsense:focus-within .vsense-tools { opacity: 1; }
+.vsense-cat {
+  border: 1px solid var(--line); border-radius: 6px; background: var(--panel);
+  color: var(--ink-2); font: inherit; font-size: 11px; padding: 2px 4px; max-width: 110px;
+}
+.vsense-del {
+  border: 0; background: none; border-radius: 5px; padding: 2px 5px;
+  font: inherit; font-size: 11px; color: var(--muted); cursor: pointer;
+}
+.vsense-del:hover { color: var(--danger); background: var(--danger-soft); }
+.vsense.is-gone .vsense-term { color: var(--muted); border-bottom-style: dotted; }
+.vsense.is-gone .vsense-where { color: var(--warn); }
+
+.vocab-row {
+  display: flex; align-items: baseline; gap: 10px; padding: 9px 4px; font-size: 13px;
+  border-bottom: 1px solid var(--line); cursor: pointer; border-radius: 6px;
+}
+.vocab-row:hover { background: var(--accent-soft); }
+.vrow-main { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.vrow-word { font-family: var(--font-en); font-weight: 650; }
+.vrow-sense { font-weight: 600; color: var(--accent-ink); }
+.vrow-gloss { font-size: 12px; color: var(--muted); }
+.vrow-side {
+  margin-left: auto; font-size: 11px; color: var(--muted); text-align: right;
+  max-width: 46%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.vocab-cats { border-top: 1px solid var(--line); background: var(--panel-2); padding: 12px 20px; max-height: 38vh; overflow-y: auto; }
+.vocab-cats-head { display: flex; justify-content: space-between; gap: 10px; margin-bottom: 8px; font-size: 11.5px; color: var(--muted); }
+.vocab-cat { display: flex; align-items: center; gap: 8px; padding: 2px 0; }
+.vocab-cat-name {
+  flex: 1; border: 1px solid transparent; border-radius: 6px; background: none;
+  font: inherit; font-size: 12.5px; color: var(--ink); padding: 4px 6px;
+}
+.vocab-cat-name:hover, .vocab-cat-name:focus { border-color: var(--line-strong); background: var(--panel); outline: none; }
+.vocab-cat-total { font-size: 11px; color: var(--muted); min-width: 44px; text-align: right; }
+.vocab-cat-empty { font-size: 12px; color: var(--muted); line-height: 1.7; }
+.vocab-cat-add { display: flex; gap: 8px; margin-top: 10px; }
+.vocab-cat-add input { flex: 1; }
+.vocab-foot { display: flex; align-items: center; gap: 8px; }
+.vocab-foot .spacer { flex: 1; }
+
+.vocab-tip {
+  position: fixed; z-index: 200; max-width: 320px; pointer-events: none;
+  background: rgba(27, 36, 80, .95); color: #f7f4ea;
+  font-size: 11.5px; line-height: 1.65; padding: 7px 10px;
+  border-radius: 8px; box-shadow: var(--shadow);
+}
+.vocab-tip[hidden] { display: none; }
+
+/* 按文章视图：分组标题 + 打开文章 + 拖到分类 */
+.vg-doc {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px; margin: 0 -2px 6px; border-radius: 9px;
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+  cursor: grab;
+}
+.vg-doc:active { cursor: grabbing; }
+.vg-doc.is-dragging { opacity: .5; }
+.vg-grip { color: var(--muted); font-size: 12px; letter-spacing: -1px; }
+.vg-title {
+  flex: 1; min-width: 0; font-size: 12.5px; color: var(--ink); font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.vg-count { font-size: 11px; color: var(--muted); }
+.vg-open {
+  flex: none; padding: 3px 9px; border-radius: 999px; font-size: 11.5px;
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  background: var(--panel); color: var(--accent-ink); cursor: pointer;
+}
+.vg-open:hover:not(:disabled) { background: var(--accent-soft); }
+.vg-open:disabled { opacity: .45; cursor: not-allowed; }
+
+.vocab-row { cursor: pointer; }
+.vocab-row.is-dragging { opacity: .5; }
+
+.vocab-drops {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  padding: 8px 16px; border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+}
+.vocab-drops[hidden] { display: none; }
+.vd-label { font-size: 11px; color: var(--muted); margin-right: 2px; }
+.vd-chip {
+  padding: 3px 10px; border-radius: 999px; font-size: 11.5px; cursor: pointer;
+  border: 1px dashed color-mix(in srgb, var(--line-strong) 90%, transparent);
+  background: var(--panel); color: var(--ink-2);
+}
+.vd-chip.is-over {
+  border-style: solid; border-color: var(--accent);
+  background: var(--accent-soft); color: var(--accent-ink);
+}
+
+.vocab-detail { display: flex; flex-direction: column; gap: 10px; }
+.vocab-back { align-self: flex-start; }
+.vw-head[role="button"] { cursor: pointer; }
+

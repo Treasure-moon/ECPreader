@@ -27,6 +27,13 @@
 
   <div class="top-actions">
     <button class="badge" id="engineBadge" title="点击修改翻译引擎">检测中…</button>
+    <button class="btn icon" id="btnVocab" title="生词本（收藏的单词与语义）" aria-label="生词本">
+      <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round">
+        <path d="M5 4.6h9.4a2.6 2.6 0 0 1 2.6 2.6v12.2H7.6A2.6 2.6 0 0 1 5 16.8z"/>
+        <path d="M17 19.4h1.8V7.2A2.6 2.6 0 0 0 16.2 4.6"/>
+        <path d="M8.4 8.6h5.2M8.4 11.8h5.2"/>
+      </svg>
+    </button>
     <button class="btn icon" id="btnAboutTop" title="关于 ECPreader / 获取帮助">?</button>
     <button class="btn icon" id="btnMore" title="设置与关于">⋮</button>
   </div>
@@ -130,6 +137,8 @@
       <div class="feature"><div class="f-icon">⇄</div><h3>段落级双向对齐</h3><p>以句子为最小对齐单元，左右两栏共享同一滚动轴，原文与译文始终同行。</p></div>
       <div class="feature"><div class="f-icon">◎</div><h3>选中即对照</h3><p>在任一栏选中内容，另一栏对应句子即时高亮；选中后可用顶部 ↻ 单独重译。</p></div>
       <div class="feature"><div class="f-icon">“”</div><h3>单词释义</h3><p>选中单个英文单词，查看音标、词典释义、当前语境义与整句意译。</p></div>
+      <div class="feature"><div class="f-icon">✦</div><h3>内置 AI 助手</h3><p>配好 AI 接口后，右下角 ✦ 随时提问：总结全文、拆解方法、找局限、解释名词，不用切窗口。</p></div>
+      <div class="feature"><div class="f-icon">☆</div><h3>生词本</h3><p>双击单词就把「这个语境里的这个意思」收进生词本，同一个词的不同意思分开记，可分类、按文章回看并导出。</p></div>
       <div class="feature"><div class="f-icon">⧉</div><h3>多标签页</h3><p>像浏览器一样同时打开多篇论文，各自独立翻译、独立滚动，互不打断。</p></div>
       <div class="feature"><div class="f-icon">⛶</div><h3>全屏阅读</h3><p>隐藏所有界面元素专注阅读，Esc 退出；左侧可随时唤出目录，Ctrl+F 照常查找。</p></div>
       <div class="feature"><div class="f-icon">⛨</div><h3>凭据本地加密</h3><p>API Key 使用 Windows DPAPI + AES-256-GCM 加密，永不落明文、永不上传。</p></div>
@@ -408,6 +417,43 @@
     <button class="btn small ghost" id="btnLoadingCancel" hidden>取消</button>
   </div>
 </div>
+
+<aside id="vocabDrawer" class="drawer" hidden aria-label="生词本">
+  <div class="drawer-backdrop" data-close="vocab"></div>
+  <div class="drawer-panel vocab-panel">
+    <header class="drawer-head">
+      <h2>生词本<span id="vocabCount" class="drawer-count"></span></h2>
+      <button class="btn icon" data-close="vocab" aria-label="关闭">✕</button>
+    </header>
+    <div class="vocab-toolbar">
+      <div class="vocab-groups" id="vocabGroup" role="tablist">
+        <button type="button" data-group="word" class="on">单词</button>
+        <button type="button" data-group="category">分类</button>
+        <button type="button" data-group="time">时间</button>
+        <button type="button" data-group="doc">文章</button>
+      </div>
+      <input id="vocabSearch" placeholder="搜索单词、释义或文章…" autocomplete="off">
+    </div>
+    <div id="vocabDrops" class="vocab-drops" hidden></div>
+    <div id="vocabList" class="vocab-list"></div>
+    <div id="vocabCatEditor" class="vocab-cats" hidden>
+      <div class="vocab-cats-head">分类管理<span>删除分类不会删除收藏，只会移回未分类</span></div>
+      <div id="vocabCatList" class="vocab-cat-list"></div>
+      <div class="vocab-cat-add">
+        <input id="vocabCatInput" placeholder="新分类名，例如「方法学」" autocomplete="off">
+        <button class="btn small" id="btnVocabCatAdd">添加</button>
+      </div>
+    </div>
+    <footer class="drawer-foot vocab-foot">
+      <button class="btn small ghost" id="btnVocabCats">分类管理</button>
+      <span class="spacer"></span>
+      <button class="btn small ghost" id="btnVocabExportMd">导出 Markdown</button>
+      <button class="btn small ghost" id="btnVocabExportCsv">导出 CSV</button>
+    </footer>
+  </div>
+</aside>
+
+<div id="vocabTip" class="vocab-tip" hidden></div>
 
 <button id="btnChat" class="chat-fab" type="button" title="AI 阅读助手（围绕当前论文）" aria-label="打开 AI 阅读助手" hidden>
   <span class="chat-fab-icon" aria-hidden="true">✦</span>

@@ -334,8 +334,8 @@ class AITranslator:
         )
         return result.get(0, "")
 
-    async def context_gloss(self, word: str, sentence: str, paragraph: str = "") -> dict[str, str]:
-        """结合语境解释单词，并给出整句意译。"""
+    async def context_gloss(self, word: str, sentence: str, paragraph: str = "") -> dict:
+        """结合语境解释单词，并给出常见直译与整句意译。"""
         prompt = (
             f"单词：{word}\n"
             f"所在句子：{sentence[:600]}\n"
@@ -343,8 +343,11 @@ class AITranslator:
             "请完成：\n"
             "1) 该词在此语境下的准确中文含义（一个简短词组，不要罗列词典义项）；\n"
             "2) 词性（n./v./adj./adv./phr. 等）；\n"
-            "3) 整句的学术化中文意译（通顺自然，保持原意）。\n"
-            '只输出 JSON：{"pos":"...","context_meaning":"...","sentence_zh":"..."}'
+            "3) 整句的学术化中文意译（通顺自然，保持原意）；\n"
+            "4) 该词最常见的 2-5 个中文直译（每个 2-8 字，按常用程度排序，只写义项本身）；\n"
+            "5) 第 4 项里最贴近本语境的那一个，原样照抄。\n"
+            '只输出 JSON：{"pos":"...","context_meaning":"...","sentence_zh":"...",'
+            '"senses":["..."],"base_sense":"..."}'
         )
         raw = await self._chat(
             [
@@ -356,8 +359,16 @@ class AITranslator:
         text = _strip_code_fence(raw)
         match = re.search(r"\{.*\}", text, re.S)
         data = json.loads(match.group(0) if match else text)
+        senses: list[str] = []
+        for item in data.get("senses") or []:
+            value = item.get("zh") if isinstance(item, dict) else item
+            value = " ".join(str(value or "").split())
+            if value and value not in senses:
+                senses.append(value[:24])
         return {
             "pos": str(data.get("pos", "")).strip(),
             "context_meaning": str(data.get("context_meaning", "")).strip(),
             "sentence_zh": str(data.get("sentence_zh", "")).strip(),
+            "senses": senses[:6],
+            "base_sense": str(data.get("base_sense", "")).strip()[:24],
         }

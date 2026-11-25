@@ -95,7 +95,42 @@ def _init(conn: sqlite3.Connection) -> None:
             created_at TEXT NOT NULL,
             PRIMARY KEY (word, context_hash)
         );
+        CREATE TABLE IF NOT EXISTS vocab_categories (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL UNIQUE,
+            created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS vocab_words (
+            word TEXT PRIMARY KEY,
+            display TEXT NOT NULL,
+            phonetic TEXT NOT NULL DEFAULT '',
+            pos TEXT NOT NULL DEFAULT '',
+            senses_json TEXT NOT NULL DEFAULT '[]',
+            updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS vocab_entries (
+            id TEXT PRIMARY KEY,
+            word TEXT NOT NULL,
+            display TEXT NOT NULL DEFAULT '',
+            sense TEXT NOT NULL DEFAULT '',
+            sense_key TEXT NOT NULL DEFAULT '',
+            sem_key TEXT NOT NULL DEFAULT '',
+            gloss TEXT NOT NULL DEFAULT '',
+            phonetic TEXT NOT NULL DEFAULT '',
+            pos TEXT NOT NULL DEFAULT '',
+            category_id TEXT,
+            doc_id TEXT,
+            doc_title TEXT NOT NULL DEFAULT '',
+            page INTEGER,
+            seq INTEGER,
+            sentence TEXT NOT NULL DEFAULT '',
+            sentence_zh TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL
+        );
         CREATE INDEX IF NOT EXISTS idx_history_created ON history(created_at);
+        CREATE INDEX IF NOT EXISTS idx_vocab_word ON vocab_entries(word);
+        CREATE INDEX IF NOT EXISTS idx_vocab_created ON vocab_entries(created_at);
+        CREATE INDEX IF NOT EXISTS idx_vocab_sem ON vocab_entries(word, sem_key);
         """
     )
     # 旧版本重新翻译会留下同一文档的多条记录；启动时只保留最后一条。
@@ -104,6 +139,14 @@ def _init(conn: sqlite3.Connection) -> None:
         "SELECT MAX(rowid) FROM history WHERE doc_id IS NOT NULL GROUP BY doc_id)"
     )
     conn.commit()
+    # 生词本是 1.7.0 新增的：早期版本把机翻的 <g id="1"> 标记一起存了进去，
+    # 这里在启动时洗一遍（幂等）。放函数内导入，避免 db ← vocab 的循环引用。
+    try:
+        from . import vocab as _vocab
+
+        _vocab.sanitize_stored()
+    except Exception:
+        pass
 
 
 def _dump(value: Any) -> str:

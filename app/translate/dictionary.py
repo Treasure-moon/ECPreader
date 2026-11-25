@@ -9,6 +9,7 @@ from urllib.parse import quote
 import httpx
 
 from .. import db
+from ..vocab import clean_sense, split_senses, tidy
 from .errors import TranslationError, error_payload
 from .pipeline import build_ai, build_free
 
@@ -49,6 +50,44 @@ async def _definitions(word: str) -> dict[str, object]:
     return {"phonetic": phonetic, "definitions": definitions[:6]}
 
 
+def _senses(word_zh: str, ai_senses: list[str], base_sense: str, word: str) -> list[str]:
+    """常见直译列表：AI 给的优先，拿不到就拆机翻结果（「银行，河岸」→ 银行/河岸）。"""
+    key = word.strip().lower()
+    cleaned = [clean_sense(item) for item in ai_senses]
+    merged = [
+        item
+        for item in dict.fromkeys([*cleaned, *split_senses(word_zh)])
+        if item and item.strip().lower() != key
+    ]
+    merged = merged[:6]
+    base_sense = clean_sense(base_sense)
+    if base_sense and base_sense not in merged:
+        merged.append(base_sense)
+    if not merged:
+        merged = [word]
+    return merged
+
+
+def _with_senses(payload: dict) -> dict:
+    """老缓存里没有 senses 字段，读出来时补上，不需要重新联网。
+
+    早期版本把机翻的 `<g id="1">` 标记一起缓存了，这里统一洗一遍。
+    """
+    payload["word_zh"] = tidy(payload.get("word_zh") or "")
+    if payload.get("context_meaning"):
+        payload["context_meaning"] = tidy(payload["context_meaning"])
+    if not payload.get("senses"):
+        word = str(payload.get("word") or "")
+        payload["senses"] = _senses(
+            str(payload.get("word_zh") or ""), [], str(payload.get("base_sense") or ""), word
+        )
+    else:
+        payload["senses"] = [clean_sense(item) for item in payload["senses"]]
+        payload["senses"] = [item for item in dict.fromkeys(payload["senses"]) if item]
+    payload.setdefault("base_sense", "")
+    return payload
+
+
 async def lookup(word: str, sentence: str = "", paragraph: str = "") -> dict:
     cleaned = _clean_word(word)
     if not cleaned:
@@ -58,7 +97,7 @@ async def lookup(word: str, sentence: str = "", paragraph: str = "") -> dict:
     ).hexdigest()[:16]
     cached = db.get_dict_cache(cleaned.lower(), context_key)
     if cached:
-        return cached
+        return _with_senses(dict(cached))
 
     warnings: list[str] = []
     settings = db.get_settings()
@@ -89,6 +128,8 @@ async def lookup(word: str, sentence: str = "", paragraph: str = "") -> dict:
     context_meaning = ""
     pos = ""
     engine = "free"
+    ai_senses: list[str] = []
+    base_sense = ""
 
     try:
         try:
@@ -99,7 +140,8 @@ async def lookup(word: str, sentence: str = "", paragraph: str = "") -> dict:
             warnings.append(f"在线词典暂不可用（{type(exc).__name__}）")
         try:
             result = await word_translation_task
-            word_zh = (result[0] if result else "").strip()
+            # 机翻会给词条套 <g id="1">…</g>，直接存下来会变成生词本里的乱码
+            word_zh = tidy(result[0] if result else "")
         except Exception as exc:
             warnings.append(error_payload(exc)["message"])
         if sentence_task is not None:
@@ -113,6 +155,8 @@ async def lookup(word: str, sentence: str = "", paragraph: str = "") -> dict:
                 gloss = await ai_task
                 context_meaning = gloss.get("context_meaning", "")
                 pos = gloss.get("pos", "")
+                ai_senses = [str(item) for item in (gloss.get("senses") or []) if str(item).strip()]
+                base_sense = str(gloss.get("base_sense") or "").strip()
                 if gloss.get("sentence_zh"):
                     sentence_zh = gloss["sentence_zh"]
                 engine = f"ai:{settings.get('ai_provider')}"
@@ -130,6 +174,8 @@ async def lookup(word: str, sentence: str = "", paragraph: str = "") -> dict:
         "word_zh": word_zh,
         "context_meaning": context_meaning,
         "pos": pos,
+        "senses": _senses(word_zh, ai_senses, base_sense, cleaned),
+        "base_sense": base_sense,
         "sentence_en": sentence.strip(),
         "sentence_zh": sentence_zh,
         "engine": engine,

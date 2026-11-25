@@ -27,7 +27,7 @@ os.environ.setdefault("PYTHONIOENCODING", "utf-8")
 
 # 版本检查会去「项目仓库」问最新版；测试里指向本机假接口，绝不联网。
 RELEASE_HITS: list[str] = []
-LATEST_TAG = "v1.6.1"
+LATEST_TAG = "v1.7.1"
 
 class MockReleases(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.0"
@@ -47,15 +47,15 @@ class MockReleases(BaseHTTPRequestHandler):
             return
         if self.path.startswith("/page"):
             self.send_response(302)
-            self.send_header("Location", "https://github.com/Treasure-moon/ECPreader/releases/tag/v1.6.9")
+            self.send_header("Location", "https://github.com/Treasure-moon/ECPreader/releases/tag/v1.7.9")
             self.send_header("Content-Length", "0")
             self.end_headers()
             return
         body = json.dumps({
             "tag_name": LATEST_TAG,
-            "name": "ECPreader 1.6.1",
+            "name": "ECPreader 1.7.1",
             "published_at": "2026-12-01T08:00:00Z",
-            "body": "## 1.6.1 " + "- 修了目录里混进页眉的问题 " + "- 阅读助手可以提示更新",
+            "body": "## 1.7.1 " + "- 修了目录里混进页眉的问题 " + "- 阅读助手可以提示更新",
         }, ensure_ascii=False).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
@@ -272,7 +272,7 @@ def main() -> int:
 
         print("版本更新检查")
         info = httpx.post(f"{base}/api/updates/check", headers=headers, timeout=30).json()
-        check("查到最新版本", info.get("latest") == "1.6.1", json.dumps(info, ensure_ascii=False)[:300])
+        check("查到最新版本", info.get("latest") == "1.7.1", json.dumps(info, ensure_ascii=False)[:300])
         check("判断出有新版", info.get("newer") is True, str(info.get("newer")))
         check("带上发布说明", "修了目录" in (info.get("notes") or ""), (info.get("notes") or "")[:120])
         check("请求到了假仓库", len(RELEASE_HITS) >= 1, str(len(RELEASE_HITS)))
@@ -291,7 +291,7 @@ def main() -> int:
             updates_mod.SOURCE = base_mock + "/ratelimit"
             updates_mod.RELEASES_PAGE = base_mock + "/page"
             result = updates_mod.refresh()
-            check("接口限流时改读网页跳转", result["latest"] == "1.6.9", result["latest"])
+            check("接口限流时改读网页跳转", result["latest"] == "1.7.9", result["latest"])
             check("限流也算查到了", result["error"] == "", result["error"])
             check("网页来源判为有新版", result["relation"] == "newer", result["relation"])
         finally:
@@ -358,7 +358,7 @@ def main() -> int:
         )
         check(
             "资料里带上联网查到的最新版",
-            "联网查到的最新发布" in system_text and "1.6.1" in system_text,
+            "联网查到的最新发布" in system_text and "1.7.1" in system_text,
             system_text[:200],
         )
         check(
@@ -516,7 +516,7 @@ async def browser_checks(base: str, doc_id: str) -> None:
         update_text = ""
         if update_line:
             update_text = (await page.locator(".chat-update").inner_text()).strip()
-        check("面板提示有新版", update_line == 1 and "1.6.1" in update_text, update_text)
+        check("面板提示有新版", update_line == 1 and "1.7.1" in update_text, update_text)
 
         await page.locator(".chat-chip", has_text="总结全文").click()
         await page.wait_for_selector(".chat-msg.assistant .chat-text", timeout=20000)
